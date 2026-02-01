@@ -1,5 +1,5 @@
 export const SITE = {
-  website: "http://localhost:4321/", // TODO: replace with your deployed domain (e.g., https://<project>.vercel.app)
+  website: "https://robin-tech-blog.vercel.app/", // deployed domain
   author: "Robin",
   profile: "",
   desc: "AI notes, field reports, and engineering playbooks.",
