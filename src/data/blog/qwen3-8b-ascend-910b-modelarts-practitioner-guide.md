@@ -184,7 +184,7 @@ huggingface-cli download Qwen/Qwen3-8B \
 ### Option C: OBS (pre-staged)
 
 ```bash
-obsutil cp -r obs://your-bucket/models/Qwen3-8B /home/ma-user/work/models/Qwen3-8B
+obsutil cp -r obs://your-bucket/models/Qwen3-8B /home/ma-user/work/models/Qwen/Qwen3-8B
 ```
 
 ---
