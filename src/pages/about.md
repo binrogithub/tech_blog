@@ -3,35 +3,13 @@ layout: ../layouts/AboutLayout.astro
 title: "About"
 ---
 
-AstroPaper is a minimal, accessible and SEO-friendly blog theme built with [Astro](https://astro.build/) and [Tailwind CSS](https://tailwindcss.com/).
+I’m **Bin Duan (段斌)**, Head of Solutions for **Huawei Cloud in Latin America**, currently based in **São Paulo, Brazil**.
 
-![Astro Paper](public/astropaper-og.jpg)
+My work focuses on helping customers turn cloud capability into measurable outcomes through a pragmatic framework I call **“1 + 3”**:
 
-AstroPaper provides a solid foundation for blogs, or even portfolios\_ with full markdown support, built-in dark mode, and a clean layout that works out-of-the-box.
+- **1 = Foundation**: the digital foundation that makes everything else reliable and scalable—unified digital touchpoints (app/web), identity & access, core self-service capabilities, event tracking, and a governed data foundation.
+- **3 = Application Modernization + Big Data + AI**: three growth engines that accelerate modernization and performance—modern business applications, scalable data infrastructure and analytics, and AI capabilities (e.g., intelligent customer service, personalization, automation, churn prevention, and decision support).
 
-The blog posts in this theme also serve as guides, docs or example articles\_ making AstroPaper a flexible starting point for your next content-driven site.
+With this approach, I support organizations across **government, financial services, telecom, and internet** industries in Latin America to adopt Huawei Cloud effectively—building the right foundations first, then accelerating innovation and growth with modernized applications, big data, and AI.
 
-## Features
-
-AstroPaper comes with a set of useful features that make content publishing easy and effective:
-
-- SEO-friendly
-- Fast performance
-- Light & dark mode
-- Highly customizable
-- Organizable blog posts
-- Responsive & accessible
-- Static search with [PageFind](https://pagefind.app/)
-- Automatic social image generation
-
-and so much more.
-
-## Show your support
-
-If you like [AstroPaper](https://github.com/satnaing/astro-paper), consider giving it a star ⭐️.
-
-Found a bug 🐛 or have an improvement ✨ in mind? Feel free to open an [issue](https://github.com/satnaing/astro-paper/issues), submit a [pull request](https://github.com/satnaing/astro-paper/pulls) or start a [discussion](https://github.com/satnaing/astro-paper/discussions).
-
-If you find this theme helpful, you can also [sponsor me on GitHub](https://github.com/sponsors/satnaing) or [buy me a coffee](https://buymeacoffee.com/satnaing) to show your support — every penny counts.
-
-Kyay zuu! 🙏🏼
+Outside of day-to-day delivery, I’m an active explorer of **frontier AI**: agent workflows, practical automation, and how emerging models can be translated into real enterprise productivity.
