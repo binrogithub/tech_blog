@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro check && astro build && pagefind --site dist && cp -r dist/pagefind public/",
+    "build:vercel": "npm run build && test -d dist && echo 'dist ok' && ls -la dist | head",
     "preview": "astro preview",
     "sync": "astro sync",
     "astro": "astro",
