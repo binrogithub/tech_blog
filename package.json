@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro check && astro build && pagefind --site dist && cp -r dist/pagefind public/",
-    "build:vercel": "npm run build && test -d dist && echo 'dist ok' && ls -la dist | head",
+    "build:vercel": "set -e; echo 'PWD='$(pwd); echo 'LS ROOT'; ls -la; echo 'RUN BUILD'; npm run build; echo 'AFTER BUILD: find dist'; find . -maxdepth 3 -type d -name dist -print; echo 'LS dist (if exists)'; ls -la dist || true; test -d dist", 
     "preview": "astro preview",
     "sync": "astro sync",
     "astro": "astro",
