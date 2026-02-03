@@ -13,7 +13,7 @@ tags:
   - devops
   - runbook
 featured: false
-draft: true
+draft: false
 ---
 
 > This post is written as a practical runbook and follows the same structure as my previous ops-focused posts (TL;DR → architecture → prerequisites → steps → validation → pitfalls).
