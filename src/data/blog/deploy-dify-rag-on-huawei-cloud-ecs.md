@@ -14,7 +14,6 @@ featured: false
 draft: false
 ---
 
-> Source: adapted from `/mnt/data/clawd/memory/tech-notes/2026-02-02_Deploy_Dify_RAG_on_Huawei_Cloud_ECS.md`.
 
 ## 1) Target Architecture
 

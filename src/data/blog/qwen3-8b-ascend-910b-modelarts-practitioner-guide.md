@@ -14,8 +14,6 @@ featured: false
 draft: false
 ---
 
-> Note: This post preserves the original runbook as much as possible. Only minimal edits were made to fit the blog format (frontmatter) and to standardize the default `MODEL_PATH`.
-
 # Qwen3-8B Deployment on Huawei Cloud ModelArts Notebook (Ascend 910B + PyTorch 2.6.0)
 
 ## Comprehensive Operational Runbook

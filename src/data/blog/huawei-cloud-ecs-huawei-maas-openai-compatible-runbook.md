@@ -15,8 +15,6 @@ featured: false
 draft: true
 ---
 
-> Note on sources: I attempted to use the Gemini CLI for web research first, but the CLI did not return output in the current environment. This post is therefore based on operational experience and prior internal runbooks. Where Huawei MaaS endpoint/model naming may vary by region/tenant, placeholders are used.
-
 ## TL;DR
 
 - Deploy your app on **Huawei Cloud ECS** (one VM) using Docker Compose.
