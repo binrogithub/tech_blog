@@ -18,13 +18,13 @@ draft: false
 
 ## 1) Background and Goal
 
-On a host equipped with 8 Ascend 910B NPUs, we needed to serve Qwen3-VL-8B (vision-language) from local weights and expose an OpenAI-compatible API so Meli can call it via HTTP.
+On a host equipped with 8 Ascend 910B NPUs, we needed to serve Qwen3-VL-8B (vision-language) from local weights and expose an OpenAI-compatible API so the client can call it via HTTP.
 
 Key constraints:
 
 - Ascend runtime and PyTorch-NPU toolchain are available inside a Huawei Cloud SWR container image, not on the host.
-- Model weights are stored on the host at `/meli/model_weights`.
-- Customer-shared test data is available on the host at `/meli/test_data`.
+- Model weights are stored on the host at `/mnt/model_weights`.
+- Customer-shared test data is available on the host at `/mnt/test_data`.
 - The server must run in the container; the client/test runner runs on the host.
 
 Deliverables:
@@ -41,8 +41,8 @@ Deliverables:
 Host:
 
 - 8x Ascend 910B
-- Test data: `/meli/test_data`
-- Model weights: `/meli/model_weights`
+- Test data: `/mnt/test_data`
+- Model weights: `/mnt/model_weights`
 - Code workspace: `/mnt/GUI`
 
 Container image (Ascend development environment):
@@ -77,7 +77,7 @@ Notes:
 
 ### 3.2 Benchmark client (host-side)
 
-- Reads `/meli/test_data/*.jsonl` and calls `/v1/chat/completions` concurrently.
+- Reads `/mnt/test_data/*.jsonl` and calls `/v1/chat/completions` concurrently.
 - Added single-image mode: `benchmark_client.py -f /path/to/image.webp`.
 
 ---
@@ -167,7 +167,7 @@ PY
 ```bash
 python - <<'PY'
 import base64, requests, time
-img_path = "/meli/test_data/pictures/test1.webp"
+img_path = "/mnt/test_data/pictures/test1.webp"
 with open(img_path, "rb") as f:
     img_b64 = base64.b64encode(f.read()).decode()
 payload = {
@@ -196,7 +196,7 @@ PY
 We added `-f` to `benchmark_client.py` for quick verification:
 
 ```bash
-python /mnt/GUI/benchmark_client.py -f /meli/test_data/pictures/test1.webp
+python /mnt/GUI/benchmark_client.py -f /mnt/test_data/pictures/test1.webp
 ```
 
 Results are written to:
@@ -251,8 +251,8 @@ HOST_PORT=${HOST_PORT:-9000}
 SERVER_PORT=${SERVER_PORT:-9000}
 
 # Paths
-HOST_MODEL_PATH=${HOST_MODEL_PATH:-/meli/model_weights}
-HOST_TEST_DATA=${HOST_TEST_DATA:-/meli/test_data}
+HOST_MODEL_PATH=${HOST_MODEL_PATH:-/mnt/model_weights}
+HOST_TEST_DATA=${HOST_TEST_DATA:-/mnt/test_data}
 HOST_CODE_DIR=${HOST_CODE_DIR:-/mnt/GUI}
 
 CONTAINER_MODEL_PATH=${CONTAINER_MODEL_PATH:-/opt/models/qwen3-vl-8b}
@@ -340,7 +340,7 @@ from PIL import Image
 from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
 
-MODEL_PATH = os.environ.get("MODEL_PATH", "/meli/model_weights")
+MODEL_PATH = os.environ.get("MODEL_PATH", "/mnt/model_weights")
 MODEL_ID = os.environ.get("MODEL_ID", MODEL_PATH)
 DEVICE = os.environ.get("DEVICE", "")
 MAX_IMAGE_PIXELS = int(os.environ.get("MAX_IMAGE_PIXELS", "2621440"))  # ~1.6K x 1.6K
@@ -633,7 +633,7 @@ logger = logging.getLogger(__name__)
 class RequestConfig:
     """Configuration for API requests."""
     url: str = "http://127.0.0.1:9000/v1/chat/completions"
-    model: str = "/meli/model_weights"
+    model: str = "/mnt/model_weights"
     max_tokens: int = 256
     temperature: float = 0.0
     timeout: float = 300.0
@@ -651,8 +651,8 @@ class BenchmarkConfig:
     concurrency_per_npu: int = 8
     rate_limit: float = 0.0  # requests per second, 0 = no limit
     output_path: str = "/mnt/GUI/test_results.jsonl"
-    input_pattern: str = "/meli/test_data/*.jsonl"
-    base_dir: str = "/meli/test_data"
+    input_pattern: str = "/mnt/test_data/*.jsonl"
+    base_dir: str = "/mnt/test_data"
     endpoints: Optional[List[str]] = None
 
 
@@ -1223,12 +1223,12 @@ async def main():
     )
     parser.add_argument(
         "--model",
-        default="/meli/model_weights",
+        default="/mnt/model_weights",
         help="Model name/path",
     )
     parser.add_argument(
         "--input",
-        default="/meli/test_data/*.jsonl",
+        default="/mnt/test_data/*.jsonl",
         help="Input file pattern",
     )
     parser.add_argument(
@@ -1310,7 +1310,7 @@ async def main():
     )
     parser.add_argument(
         "--base-dir",
-        default="/meli/test_data",
+        default="/mnt/test_data",
         help="Base directory for resolving relative image paths",
     )
     
