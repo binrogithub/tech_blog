@@ -16,10 +16,6 @@ featured: false
 draft: false
 ---
 
-> This post is written as a practical runbook and follows the same structure as my previous ops-focused posts (TL;DR → architecture → prerequisites → steps → validation → pitfalls).
->
-> Research note: Gemini CLI was unavailable in my environment, so I used public docs via web fetch and combined them with my own operational history (cron-based Telegram health checks, etc.).
-
 ## TL;DR
 
 - Run **OpenClaw Gateway** on **Huawei Cloud ECS** (Linux VM) and keep it running 24/7.
