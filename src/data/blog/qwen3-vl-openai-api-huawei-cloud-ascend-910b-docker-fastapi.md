@@ -1,8 +1,19 @@
-Title: Deploying a Qwen3-VL OpenAI-Compatible API on Huawei Cloud Ascend (910B) with Docker + FastAPI (and a Load-Test Client)
-
-Author: Duan Bin  
-Date: February 3, 2026
-
+---
+author: Robin
+pubDatetime: 2026-02-03T00:00:00-03:00
+title: "Deploying a Qwen3-VL OpenAI-Compatible API on Huawei Cloud Ascend (910B) with Docker + FastAPI"
+description: "A comprehensive guide to deploying Qwen3-VL-8B vision-language model on Ascend 910B NPUs with an OpenAI-compatible FastAPI server, including container setup, load testing, and production deployment patterns."
+tags:
+  - qwen3-vl
+  - huawei-cloud
+  - ascend-910b
+  - docker
+  - fastapi
+  - openai-api
+  - vision-language-model
+  - npu
+featured: true
+draft: false
 ---
 
 ## 1) Background and Goal
