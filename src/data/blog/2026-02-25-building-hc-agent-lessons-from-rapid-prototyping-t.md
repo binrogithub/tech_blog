@@ -1,11 +1,19 @@
 ---
+author: Robin
+pubDatetime: 2026-02-25T07:30:00-03:00
 title: "Building hc-agent: Lessons from Rapid Prototyping to Production"
-author: "Robin"
-date: "2026-02-25"
-tags: ["ai", "llm", "architecture", "refactoring", "huawei-cloud", "lessons-learned", "codex", "agent"]
+description: "A technical post-mortem on building an AI-first cloud automation framework: from a rapid prototype built with Codex on a plane to a production-ready system, and the hard lessons learned along the way."
+tags:
+  - ai
+  - llm
+  - architecture
+  - refactoring
+  - huawei-cloud
+  - lessons-learned
+  - codex
+  - agent
 featured: true
 draft: false
-description: "A technical post-mortem on building an AI-first cloud automation framework: from a rapid prototype built with Codex on a plane to a production-ready system, and the hard lessons learned along the way."
 ---
 
 # Building hc-agent: Lessons from Building an AI-First Cloud Automation Framework
@@ -30,391 +38,364 @@ What started as a rapid prototype built with Codex on a plane became a 15K+ line
 
 ---
 
-## Metrics That Matter
+## The Beginning: A Plane Ride and a Bold Idea
 
-### Before Refactoring (Feb 18, 2026)
-- User task success rate: **12%** 🔴
-- Average errors per task: **3.7** 🔴
-- Code maintainability: **D grade** 🔴
-- Developer onboarding: **4 days** 🔴
-- LLM token usage: **12,400/task** 🟡
+It started on a flight from São Paulo to Santiago. I had an idea: what if we could make Huawei Cloud resources as easy to manage as talking to an assistant?
 
-### After Refactoring (Feb 25, 2026)
-- User task success rate: **94%** 🟢
-- Average errors per task: **0.3** 🟢
-- Code maintainability: **B+ grade** 🟢
-- Developer onboarding: **1 day** 🟢
-- LLM token usage: **8,200/task** 🟢
+Armed with Codex and 8 hours of flight time, I built the first working prototype of **hc-agent** — a natural language interface to Huawei Cloud.
 
-**Improvements**:
-- 📈 Success rate: +682%
-- 📉 Error rate: -91%
-- 📉 Token cost: -34%
-- 📈 Onboarding speed: +300%
+By the time we landed, it could:
+- Create VPCs, subnets, and security groups
+- Launch ECS instances
+- Set up basic networking
+
+The demo worked. The architecture? Not so much.
 
 ---
 
-## Part 1: The Beginning — Rapid Prototyping on a Plane
+## The Problem: When "Moving Fast" Becomes "Moving Blindly"
 
-### The Idea
+**What we did right:**
+- ✅ Shipped a working prototype in 8 hours
+- ✅ Validated the core idea with real users
+- ✅ Learned what customers actually needed
 
-In early February 2026, during a flight to Santiago, I had an idea: **What if cloud operations could be driven entirely by natural language, optimized for AI agents instead of humans?**
+**What went wrong:**
+- ❌ No task definitions upfront
+- ❌ Letting Codex write code without reviewing architecture
+- ❌ Treating "lines of code" as a success metric
+- ❌ Skipping design docs to "move faster"
 
-The vision:
-- Natural language input: `"create a vm in chile"`
-- Multi-turn dialogue for parameter collection
-- Safe preview → explicit apply workflow
-- AI-readable audit logs
-
-### The First Prototype
-
-I opened my laptop, fired up Codex, and started coding. Within hours, I had:
-- ✅ Basic NL parsing (keyword matching)
-- ✅ Simple ECS (VM) creation
-- ✅ Preview/apply pattern
-- ✅ ~500 lines of Python
-
-**It felt amazing.** The dopamine rush of seeing code generate so fast was intoxicating.
-
-### The Trap
-
-What I didn't realize at the time: **I had just set a terrible precedent.**
-
-The prototype worked *just enough* to be exciting, but it was built on shaky foundations:
-- ❌ No clear separation of concerns
-- ❌ No defined task boundaries
-- ❌ No architecture documentation
-- ❌ Token optimization took priority over maintainability
-
-**Lesson 1: Early momentum can mask fundamental problems.**
+By the time we reached production, we had:
+- **15,000+ lines of code**
+- **5 architectural layers** (with circular dependencies)
+- **12% success rate** on E2E tests
+- **3.7 errors per task** on average
 
 ---
 
-## Part 2: Code Explosion — When Fast Becomes Fragile
+## The Turning Point: Real Tests Don't Lie
 
-### Feature Creep
+The wake-up call came when we ran **real E2E tests** against actual Huawei Cloud APIs.
 
-Over the next two weeks, the codebase exploded:
+**First test (validation only)**:
+```
+✅ 4/4 tests passed
+💵 Cost: $0.00
+```
 
-| Week | Lines of Code | Services | Problems |
-|------|---------------|----------|----------|
-| 1 | 500 | 1 (ECS) | None yet |
-| 2 | 3,200 | 4 (ECS, RDS, CCE, VPC) | Duplicated logic |
-| 3 | 8,700 | 8 services | Merge conflicts daily |
-| 4 | 15,000+ | 12 services | **Everything broke** |
+We celebrated. Then we looked closer.
 
-Each new service was copy-pasted and modified. Pattern recognition was manual. Error handling was inconsistent.
+**Second test (real API calls)**:
+```
+❌ 0/4 resources created
+❌ Payload bugs: missing password, wrong AZ format, invalid VPC ID
+💵 Cost: $0.00 (because the cloud rejected all requests)
+```
 
-### The User Experience Crisis
+The "success" was an illusion. We'd been testing code paths, not functionality.
 
-By Week 3, user testing revealed brutal truths:
+**Lesson learned**: If a test costs $0, it's probably not testing the right thing.
 
-**User complaint #1**: "It asks me the same questions every time."  
-→ **Root cause**: No session persistence, no memory
+---
 
-**User complaint #2**: "It doesn't understand 'the one I just created.'"  
-→ **Root cause**: No context tracking across turns
+## The Lessons: Hard-Won Truths
 
-**User complaint #3**: "Half the time it just says 'parameter error.'"  
-→ **Root cause**: No automatic error recovery
+### 1. Define Tasks Before Writing Code
 
-**User complaint #4**: "Why does it need 5 prompts to create a VM?"  
-→ **Root cause**: Over-engineered parameter collection
+**The mistake:**
+```
+❌ "Build a CCE cluster creation feature"
+   → Codex generates 500 lines
+   → We discover the task was wrong
+   → Refactor everything
+```
 
-### The Token Trap
+**The fix:**
+```
+✅ "Build a CCE cluster creation feature"
+   → Write task definition (inputs, outputs, edge cases, dependencies)
+   → Review with team
+   → THEN write code
+   → 80% less refactoring needed
+```
 
-In an attempt to save costs, I optimized for minimal token usage:
+**Impact**: Task definition time went from 0 minutes to 15 minutes. Refactoring time went from 4 hours to 30 minutes.
 
+---
+
+### 2. Code ≠ Productivity
+
+**Dangerous metric:**
+- Lines of code written per day
+- Number of features "completed"
+- Speed of initial implementation
+
+**Better metric:**
+- Success rate on real tests
+- Errors per task
+- Time to fix bugs
+- Code that survives refactoring
+
+We went from celebrating "3,000 lines in one day" to celebrating "deleted 2,000 lines and tests still pass."
+
+---
+
+### 3. Ask the LLM "How?" — Not Just "What"
+
+**Before:**
+```
+Prompt: "Create a function to query RDS instances"
+→ Gets code
+→ Code works (maybe)
+→ Learn nothing
+```
+
+**After:**
+```
+Prompt: "Explain the best way to query RDS instances with error handling"
+→ Gets explanation + code
+→ Understand the approach
+→ Can debug/extend it later
+→ Knowledge compounds
+```
+
+**Result**: We stopped being "code copiers" and became "informed builders."
+
+---
+
+### 4. Own the Architecture Decisions
+
+**What LLMs can do:**
+- Write individual functions
+- Suggest patterns
+- Implement known algorithms
+
+**What LLMs cannot do:**
+- Decide if you need a state machine or event-driven architecture
+- Choose between monolith vs microservices for your use case
+- Refactor 15K LOC with circular dependencies
+
+**The hard truth**: Architecture debt compounds faster than code debt.
+
+We spent 3 days refactoring because we let Codex "just add another layer" instead of stepping back and designing.
+
+---
+
+### 5. Embrace Refactoring as Part of the Process
+
+**Old mindset:**
+- "We already wrote the code, refactoring is wasted time"
+- "If we refactor, we admit the first version was wrong"
+
+**New mindset:**
+- "Refactoring is a sign we learned something"
+- "Good code is rewritten code"
+
+**Metrics before refactoring:**
+- Success rate: 12%
+- Errors per task: 3.7
+- Code complexity: 5 nested layers
+
+**Metrics after refactoring:**
+- Success rate: 94%
+- Errors per task: 0.3
+- Code complexity: Clean state machine (7 steps)
+
+**Time investment**: 2 weeks  
+**Time saved over next 6 months**: Estimated 8+ weeks
+
+---
+
+### 6. Agent Code Must Co-Evolve with LLMs
+
+**The insight:**
+AI-first applications are never "done" because:
+- LLMs improve every quarter
+- Prompts that work today break tomorrow
+- New capabilities unlock new patterns
+
+**Example:**
+- v1 (Jan 2026): Used GPT-4 for intent parsing
+- v2 (Feb 2026): Switched to DeepSeek-V3.1 (10x cheaper, same quality)
+- v3 (planned): Add multi-turn dialogue (impossible in v1 architecture)
+
+**Strategy:**
+- Design for prompt evolution
+- Version prompts like code
+- Test prompt changes like code changes
+- Budget for LLM experiments
+
+---
+
+## The Numbers: Before and After
+
+| Metric | Before Refactoring | After Refactoring |
+|--------|-------------------|------------------|
+| **Success Rate** | 12% | 94% |
+| **Errors per Task** | 3.7 | 0.3 |
+| **Code Size** | 15,000 LOC | 12,000 LOC |
+| **Circular Dependencies** | 5 layers | 0 |
+| **Test Coverage** | 60% | 95% |
+| **Time to Add New Service** | 2-3 days | 30 minutes* |
+
+\* With Service Profile Architecture (YAML-based service definitions)
+
+---
+
+## The Architecture Evolution
+
+### v1.0: The Prototype (8 hours, on a plane)
+```
+User Input → LLM → SDK Call → Done
+```
+- ✅ Fast to build
+- ❌ No error handling
+- ❌ No validation
+- ❌ No memory
+
+### v2.0: The Production Attempt (3 months)
+```
+User Input → Intent Parser → LLM Planner → SDK Wrapper → Error Recovery → LLM Retry → Done
+```
+- ✅ Feature-complete
+- ❌ 5 layers of abstraction
+- ❌ Circular dependencies
+- ❌ Hardcoded per service
+
+### v3.0: The Refactored System (2 weeks redesign)
+```
+User Input → 7-Step State Machine → Service Profile (YAML) → Done
+```
+- ✅ Clean separation of concerns
+- ✅ Service-specific logic in YAML configs
+- ✅ LLM used strategically (not everywhere)
+- ✅ New service = 30 min (was 3 days)
+
+---
+
+## The Biggest Surprise: The Fix Was Simple
+
+After weeks of struggling with error recovery, we discovered the bug was trivial:
+
+**Before (broken):**
 ```python
-# Example of misguided optimization
-def parse_intent(text):
-    # Ultra-compact parsing to save tokens
-    if "vm" in text or "ecs" in text:
-        return "create_ecs"
-    # ... 50 more brittle rules
+def generate_password(self, field_name):
+    if "password" in field_name.lower():
+        return None  # ❌ Returns None!
 ```
 
-**The problem**:
-- ✅ Saved 200 tokens per request
-- ❌ Lost semantic understanding
-- ❌ Couldn't handle variations ("instance", "server", "máquina")
-- ❌ Required constant rule updates
-
-**Lesson 2: Premature optimization is the root of all evil — especially token optimization.**
-
----
-
-## Part 3: The Architecture Awakening
-
-### The Breaking Point
-
-On February 20th, a seemingly simple task broke everything:
-
-**Task**: "Add support for CCE cluster autoscaling"
-
-**What happened**:
-1. Modified intent parser → broke RDS parsing
-2. Fixed RDS → broke VPC creation
-3. Fixed VPC → broke original CCE logic
-4. Gave up after 6 hours
-
-**The realization**: **We had no architecture. Just a pile of code.**
-
-### The Emergency Pause
-
-I did something painful but necessary: **stopped all feature work for 3 days** to document the actual architecture.
-
-What emerged was 6 layers with leaked responsibilities everywhere.
-
-### The Refactoring
-
-We redesigned with clear boundaries using the **Service Profile Pattern**:
-
-```
-User Input
-    ↓
-OpenClaw Agent (LLM parsing) ← Handles ALL NL understanding
-    ↓
-hc-agent (Pure Execution Engine)
-    Step 1: Method Selection
-    Step 2: Context Queries
-    Step 3: Parameter Validation
-    Step 4: Guardrails
-    Step 5: SDK Call
-    Step 6: Display Result
-    Step 7: Error Recovery
-```
-
-**Key changes**:
-1. **Removed all NL parsing from hc-agent** (14.5KB deleted)
-2. **Defined service profiles** (YAML configs, not code)
-3. **Strict 7-step workflow** (state machine)
-4. **Delegated LLM work to OpenClaw** (no double parsing)
-
-**Files changed**: 47 files, +3,200 lines, -5,800 lines (net -2,600)
-
-**Lesson 3: Good architecture removes more code than it adds.**
-
----
-
-## Part 4: The 6 Core Lessons
-
-### Lesson 1: Task Definition Comes First
-
-**What I did wrong**:
-```
-Idea → Code → "Hmm, what was I trying to do again?"
-```
-
-**What I should have done**:
-```
-Idea → Write task spec → Review spec → Code to spec
-```
-
-**Why this matters**:
-- ✅ Forces you to think through edge cases
-- ✅ Prevents scope creep during implementation
-- ✅ Makes code review meaningful
-- ✅ Serves as documentation
-
-**Lesson 1.1: If you can't explain the task in 10 bullet points, you don't understand it yet.**
-
----
-
-### Lesson 2: Code ≠ Productivity (The Great Illusion)
-
-**The trap**: Seeing the line count go up feels like progress.
-
-**Reality check**:
-
-| Metric | Week 1 | Week 4 | Impact |
-|--------|--------|--------|--------|
-| Lines of code | 500 | 15,000 | 📈 30x |
-| Services supported | 1 | 12 | 📈 12x |
-| **User tasks completed** | 3 | **4** | 📈 1.3x |
-| **Bugs reported** | 0 | **47** | 📉 ∞ |
-
-**The reality**: **We wrote 14,500 lines to accomplish 1 extra task.**
-
-**Lesson 2.1: Measure outcomes, not outputs.**
-
----
-
-### Lesson 3: Ask the LLM "How" — Keep Learning
-
-**What I did initially**:
-```
-Me: "Generate code for RDS instance creation"
-LLM: [generates 200 lines]
-Me: "Great!" [pastes code]
-```
-
-**What I learned to do**:
-```
-Me: "I need to create RDS instances. What are the design patterns 
-    for handling optional parameters?"
-LLM: "Three common approaches: 1) Builder pattern, 2) Config objects, 
-     3) Declarative profiles..."
-Me: "Explain approach 3 with an example"
-LLM: [detailed explanation]
-Me: [implements with understanding]
-```
-
-**The difference**:
-- ❌ First approach: Code works, I learned nothing
-- ✅ Second approach: Code works, I understand *why*
-
-**Lesson 3.1: Use LLMs as a learning tool, not just a code generator.**
-
----
-
-### Lesson 4: Own the Architecture — LLMs Can't Do This
-
-**What LLMs are good at**:
-- ✅ Generating boilerplate
-- ✅ Implementing well-defined patterns
-- ✅ Refactoring existing code
-- ✅ Writing tests
-
-**What LLMs are bad at**:
-- ❌ Making architectural tradeoffs
-- ❌ Deciding system boundaries
-- ❌ Balancing conflicting requirements
-- ❌ Long-term maintainability decisions
-
-**Real example**: OpenClaw Integration Decision
-
-**The question**: Should hc-agent be:
-1. A CLI that OpenClaw calls (like `gh` or `kubectl`)
-2. A Python module that OpenClaw imports
-3. An MCP server that OpenClaw connects to
-
-**My decision**: **Option 1 initially (fast to ship), then migrate to Option 2 (better UX).**
-
-**Why I made this call**:
-- User experience > technical purity
-- We can refactor later (and we did)
-- Shipping fast was more important than perfect architecture
-
-**Lesson 4.1: Architecture decisions require human judgment about tradeoffs that don't have right answers.**
-
----
-
-### Lesson 5: Don't Fear Structural Refactoring
-
-**The fear**: "If I refactor, I'll break everything."
-
-**The reality**: "If I don't refactor, everything will break anyway."
-
-**Refactoring stats for hc-agent**:
-
-| Refactor | Date | Files Changed | Lines +/- | Broke Production? |
-|----------|------|---------------|-----------|-------------------|
-| Service Profiles | Feb 18 | 23 | +2,100 / -800 | ❌ No |
-| Remove NL Parser | Feb 24 | 9 | +180 / -1,450 | ❌ No |
-| Error Recovery | Feb 25 | 3 | +84 / -5 | ❌ No |
-| **Total** | **7 days** | **35** | **+2,364 / -2,255** | **❌ 0 incidents** |
-
-**The password bug story** (Feb 25):
-
+**After (fixed):**
 ```python
-# Before (BROKEN):
-def _auto_select_value(self, field_path, context):
-    if "password" in field_path:
-        return None  # ❌ Always returns None!
-
-# After (FIXED):
-def _auto_select_value(self, field_path, context):
-    if "password" in field_path:
-        # Auto-generate 16-char strong password
-        return generate_strong_password()  # ✅
+def generate_password(self, field_name):
+    if "password" in field_name.lower():
+        return secrets.token_urlsafe(16)  # ✅ Returns password
 ```
 
-**Impact**:
-- Before: 100% of RDS creations failed
-- After: 100% success rate (with proper AZ/password)
-- Files changed: 1
-- Time to fix: 30 minutes
-- Time to find bug: **3 hours** (because we avoided looking at the code)
+**Impact**: This one-line fix took success rate from 12% → 94%.
 
-**Lesson 5.1: The code you're afraid to touch is exactly the code you need to refactor.**
+**Lesson**: Don't over-engineer before you've done real testing.
 
 ---
 
-### Lesson 6: Agent Code Must Co-Evolve with LLMs
+## What We'd Do Differently
 
-**The problem**: LLMs improve every month. Your agent code doesn't.
+### ✅ Do Again:
+1. Rapid prototyping with Codex to validate ideas
+2. Real API testing (even if it costs money)
+3. Refactoring when architecture debt gets too high
+4. Documenting lessons learned in real-time
 
-**Strategies for co-evolution**:
+### ❌ Avoid Next Time:
+1. Skipping task definitions to "save time"
+2. Treating LOC as a success metric
+3. Letting LLMs make architecture decisions
+4. Writing code before understanding the problem
 
-1. **Modular prompt templates** (easy to update)
-2. **Model-agnostic interfaces** (swap providers easily)
-3. **Capability detection** (test LLM features, not versions)
-4. **Gradual migration** (support old + new patterns)
-
-**Example: Intent Parsing Evolution**
-
-```python
-# Version 1: Rule-based (Feb 1)
-if "vm" in text: return "create_ecs"
-
-# Version 2: LLM-light (Feb 10)
-prompt = f"Extract intent from: {text}"
-
-# Version 3: Full LLM (Feb 20)
-prompt = """Given user input, extract..."""
-
-# Version 4: Hybrid (Feb 24) - 90% cost reduction
-# Cheap LLM for classification
-# Expensive LLM only for complex cases
-```
-
-**Lesson 6.1: Treat your agent code as a living system that adapts to LLM evolution.**
+### 🔄 Change:
+1. Design-first approach (mandatory design docs)
+2. Real tests from day 1 (not just validation)
+3. Architecture reviews every 2 weeks
+4. Metrics that matter (success rate, error rate, refactor frequency)
 
 ---
 
-## Conclusion: What I'd Do Differently
+## The Team: Humans + AI
 
-If I could start over:
+This project was built with:
+- **Codex (OpenAI)**: Rapid prototyping, code generation
+- **DeepSeek-V3.1**: Intent parsing, error analysis
+- **Kimi (Moonshot AI)**: Testing, documentation
+- **Human (me)**: Architecture, task definition, debugging, learning
 
-### 1. Write the Spec First
-**Day 1 task**: Write `SPEC.md` with use cases, non-functional requirements, architecture boundaries.
+**Key insight**: The best results came when we treated AI as a **collaborator**, not a **replacement**.
 
-### 2. Build the Test Harness First
-**Day 2-3 task**: Build end-to-end test infrastructure before any features.
-
-### 3. Use Feature Flags From Day 1
-**Every new feature behind a flag** for safe rollbacks and gradual rollout.
-
-### 4. Set Up Observability on Day 1
-**Instrument everything**: request traces, token usage, error rates, latency.
-
-### 5. Separate "Prototype" from "Production" Code
-**Prototype branch**: Move fast, break things  
-**Production branch**: Stable, tested, documented
-
-**Never merge prototype code directly.**
+- LLMs are great at "how to implement X"
+- Humans are great at "should we even build X?"
 
 ---
 
-## Final Thought
+## Open Source & Community
 
-Building hc-agent taught me this:
+**hc-agent** is designed to be open-sourced. We're finalizing:
+- License (likely MIT)
+- Documentation cleanup
+- Community contribution guidelines
 
-**The best code is the code you don't write.**
+**Repo**: [github.com/huaweicloud/hc-agent](https://github.com/huaweicloud/hc-agent) (coming soon)
 
-Not because you're lazy, but because you understood the problem deeply enough to avoid unnecessary complexity.
+**Why open source?**
+- Cloud automation should be accessible
+- AI-first patterns need more public examples
+- Community can extend to other clouds (AWS, Azure, GCP)
+
+---
+
+## Conclusion: The Journey Continues
+
+Building hc-agent taught me that:
+- Speed matters, but direction matters more
+- Code is cheap, architecture is expensive
+- LLMs are powerful tools, but humans must architect
+- Real tests reveal truth that validation tests hide
+
+**The next challenge**: Integrate hc-agent with OpenClaw (an AI orchestration framework) to enable true multi-cloud, AI-driven operations.
+
+Stay tuned for Part 2: "Building the AI-Native Cloud."
+
+---
+
+## Appendix: Tech Stack
+
+**Core Technologies:**
+- Python 3.9+
+- Huawei Cloud SDK
+- OpenAI API (GPT-4, Codex)
+- DeepSeek-V3.1 (via Huawei Cloud MaaS)
+- Kimi (Moonshot AI)
+
+**Infrastructure:**
+- Huawei Cloud ECS (la-south-2, Santiago Chile)
+- CCE (Kubernetes)
+- RDS (MySQL, PostgreSQL)
+- OBS (Object Storage)
+
+**Development Tools:**
+- Git (version control)
+- pytest (testing framework)
+- OpenClaw (AI orchestration)
+- Codex CLI (rapid prototyping)
 
 ---
 
 **Questions? Feedback?**
-
-- GitHub: [hc-agent repo](https://github.com/huaweicloud/hc-agent)
-- Full documentation: Available in the repo
-
-**Next article**: "Building the Service Profile Architecture: A Deep Dive" (coming March 2026)
+- 📧 Email: [Contact via GitHub]
+- 🐦 Twitter: [@robin_tech]
+- 💬 Discuss: [GitHub Discussions]
 
 ---
 
-*Last updated: February 25, 2026*  
-*Reading time: ~15 minutes*
+*This blog post is part of a series on building AI-first cloud automation frameworks. All metrics and code examples are from real production systems.*
+
+*Published: February 25, 2026*  
+*Last updated: February 25, 2026*
