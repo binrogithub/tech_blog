@@ -226,6 +226,95 @@ AI-first applications are never "done" because:
 - Test prompt changes like code changes
 - Budget for LLM experiments
 
+
+---
+
+## What Makes Agents Work: Patterns from Successful Tools
+
+After building hc-agent and studying other AI-first tools, I've identified four patterns that separate working agents from glorified scripts:
+
+### 1. Runtime Knowledge Access
+
+**Traditional software**: Hardcode everything upfront  
+**Successful agents**: Discover knowledge at runtime
+
+```python
+# ❌ Hardcoded (breaks when API changes)
+FLAVORS = ['cce.s1.small', 'cce.s2.large']
+
+# ✅ Runtime discovery (adapts automatically)
+flavors = client.list_cluster_flavors()
+docs = fetch_api_docs()
+```
+
+**Examples**:
+- **Claude Code**: Reads project files to understand context
+- **OpenClaw**: Loads skill definitions from SKILL.md at runtime
+- **Manus**: Inspects DOM to find elements dynamically
+
+### 2. Error → Analysis → Retry Loop
+
+**Traditional software**: Exception → Exit  
+**Successful agents**: Exception → Analyze → Fix → Retry
+
+```python
+# Agent pattern
+for attempt in range(3):
+    try:
+        result = create_resource(config)
+        break
+    except Exception as e:
+        error_type = classify_error(e)
+        if fixable(error_type):
+            config = llm_suggest_fix(config, e)
+            continue
+        raise
+```
+
+**Key insight**: Failure is not the end—it's data.
+
+### 3. Context-Aware Decisions
+
+**Traditional software**: Static defaults  
+**Successful agents**: Dynamic selection based on context
+
+Instead of `DEFAULT_FLAVOR = 'small'`, agents consider:
+- User intent ("production" vs "test")
+- Project history (what worked before?)
+- Current availability (query API in real-time)
+- Cost constraints (budget awareness)
+
+### 4. Tool Composition
+
+**Traditional software**: Monolithic functions  
+**Successful agents**: Compose simple tools
+
+```python
+# Agent pattern
+def deploy_app():
+    cluster = tool.create_cluster()
+    tool.wait_ready(cluster)
+    tool.deploy_app(cluster)
+    tool.validate_health(cluster)
+```
+
+Each tool is atomic, composable, and independently retryable.
+
+---
+
+## The Critical Difference
+
+| Traditional Software | Successful Agents |
+|---------------------|-------------------|
+| Predefined all paths | Explores paths dynamically |
+| if-else tree | Search + learning |
+| Fails once, stops | Fails, learns, retries |
+| Hardcoded knowledge | Runtime discovery |
+
+**Bottom line**: Agents that work treat errors as learning opportunities and runtime as a knowledge source.
+
+
+
 ---
 
 ## The Numbers: Before and After
