@@ -1,269 +1,452 @@
 ---
 author: Robin
 pubDatetime: 2026-03-28T11:55:00-03:00
-title: "Qwen3-Coder: The Next-Gen AI Coding Assistant for Startups"
-description: "Open-source, multi-lingual, and powerful enough to rival GPT-4 on coding tasks—without the API bills. A comprehensive guide for startups looking to optimize AI coding costs while maintaining quality."
+title: "How We Successfully Started Qwen3-Coder-Next on Huawei Ascend 910B with vLLM-Ascend 0.17"
+description: "Complete deployment guide for Qwen3-Coder-Next on Huawei Ascend 910B with vLLM-Ascend 0.17. Documents the working configuration after multiple failed attempts, covering CANN 8.5.1, W8A8 quantization, worker startup modes, and KV cache management."
 tags:
-  - ai-coding
-  - qwen3
-  - cost-optimization
-  - startup-tools
-  - open-source
-  - llm
-  - developer-productivity
-  - code-generation
-  - self-hosted
+  - huawei-cloud
+  - ascend
+  - vllm
+  - qwen3-coder
+  - deployment
+  - quantization
+  - ai-infrastructure
+  - model-serving
 featured: true
 draft: false
 ---
 
-# Qwen3-Coder: The Next-Gen AI Coding Assistant for Startups
+# How We Successfully Started Qwen3-Coder-Next on Huawei Ascend 910B with vLLM-Ascend 0.17
 
-**TL;DR**: Qwen3-Coder is changing the game for lean engineering teams. Open-source, multi-lingual, and powerful enough to rival GPT-4 on coding tasks—without the API bills.
+## Overview
 
----
+This post documents the deployment path that finally worked for **Qwen3-Coder-Next** on a Huawei Ascend 910B environment after several failed attempts across older CANN and `vllm-ascend` combinations.
 
-## Why Another Coding Model?
+The important point is that this was not a "one-parameter fix." The successful result came from aligning four things at the same time:
 
-Every startup faces the same trade-off: **ship fast vs. ship right**. You need velocity, but you can't afford technical debt. Traditional coding assistants either lock you into expensive APIs (OpenAI, Anthropic) or sacrifice quality for cost (older open models).
+1. A **supported runtime stack** based on `CANN 8.5.1`
+2. A **quantized W8A8 model** instead of the original BF16 weights
+3. The correct **worker startup mode** for the current stack
+4. A hard **KV cache cap** to keep memory usage bounded
 
-**Qwen3-Coder breaks this false choice.**
+If you are trying to deploy Qwen3-Coder-Next on Ascend and keep hitting startup failures, KV cache OOMs, or inconsistent worker crashes, this is the configuration that actually worked.
 
-Developed by Alibaba's Qwen team, it's a **128K-context coding LLM** trained on 6.5 trillion tokens of code and technical content. It understands:
-- 92+ programming languages
-- Repository-level context (read entire codebases)
-- Multi-file refactoring
-- Code review with architectural awareness
+## Final Working Environment
 
-And it's **open-source** (Apache 2.0).
+The final successful deployment ran on an Ascend notebook host with:
 
----
+- `8` visible NPUs
+- `CANN 8.5.1`
+- driver `23.0.6`
+- Python environment at:
 
-## What Makes It Special?
-
-### 1. **Cost-Optimized for Startups**
-Run Qwen3-Coder locally or on your own cloud:
-- **7B model**: Runs on 16GB VRAM (RTX 4090, or cheap cloud GPUs)
-- **14B model**: Production-ready at <$0.50/million tokens (vs. GPT-4's $30)
-- **No vendor lock-in**: Self-host = zero marginal cost at scale
-
-For a seed-stage team burning $5K/month on OpenAI API, switching to Qwen3-Coder can save **$50K+ annually**.
-
-### 2. **Multi-Lingual by Design**
-Most coding models are English-first. Qwen3-Coder natively handles:
-- 🇨🇳 Chinese (technical docs, variable names)
-- 🇪🇸 Spanish / 🇧🇷 Portuguese (LATAM teams)
-- 🇷🇺 Russian, 🇯🇵 Japanese, 🇰🇷 Korean
-
-Why this matters: If your team speaks Mandarin or your docs are in Spanish, Qwen3 doesn't need translation layers. It just *works*.
-
-### 3. **Repository-Aware Intelligence**
-128K context window means:
-- Read **entire microservices** in one pass
-- Trace dependencies across 50+ files
-- Suggest refactors that respect your architecture
-
-Example: Ask "migrate this Flask API to FastAPI" and it'll rewrite routes, update dependencies, and preserve your auth middleware—all in one turn.
-
----
-
-## Real-World Use Cases
-
-### Scenario 1: Rapid Prototyping
-**Task**: Build a REST API for a fintech MVP (payments, user auth, webhook processing).
-
-**With Qwen3-Coder**:
 ```bash
-# Local inference (no API calls)
-$ qwen-cli "Create a production-ready FastAPI service with:
-- Stripe webhook handling
-- JWT auth
-- PostgreSQL integration
-- Dockerized deployment"
+/home/ma-user/work/venvs/unified-py311
 ```
 
-**Output**: Fully structured project with:
-- `app/routers/` (endpoints)
-- `app/models/` (SQLAlchemy schemas)
-- `Dockerfile` + `docker-compose.yml`
-- Unit tests with pytest
+Installed versions in the successful run:
 
-**Time saved**: 4-6 hours of boilerplate → 15 minutes.
+- `vllm==0.17.0`
+- `vllm-ascend==0.17.0rc1`
+- `torch==2.9.0`
+- `torch_npu==2.9.0`
+- `transformers==4.57.6`
+- `triton-ascend==3.2.0`
+- `modelscope==1.35.0`
+- `xgrammar==0.1.29`
 
----
+Additional dependencies that also had to exist in the environment:
 
-### Scenario 2: Code Review at Scale
-**Problem**: Your team merged 200+ PRs last quarter. Technical debt is creeping in.
+- `kaldi-native-fbank`
+- `opentelemetry-api`
+- `opentelemetry-exporter-otlp`
+- `opentelemetry-sdk`
+- `opentelemetry-semantic-conventions-ai`
 
-**Solution**: Batch-review with Qwen3:
-```python
-# review_automation.py
-from qwen_api import QwenCoder
+This version alignment mattered. Earlier work on older stacks could sometimes load weights, but the deployment remained unstable or failed later during worker startup, Triton integration, or KV cache initialization.
 
-model = QwenCoder("qwen3-coder-14b")
-commits = get_recent_commits(days=90)
+## Why BF16 Was Not the Final Path
 
-for commit in commits:
-    issues = model.review(commit.diff, context=commit.repo)
-    if issues.critical:
-        create_ticket(issues)
-```
+The original BF16 model was not the final serving format.
 
-**Result**: Auto-flagged 14 security issues, 28 performance anti-patterns, 0 false positives.
+In earlier experiments, BF16 repeatedly failed for a practical reason:
 
----
+- model weights could load
+- but the service still died during **KV cache initialization**
+- lowering only `max_model_len` was not a sufficient long-term fix
 
-### Scenario 3: Multi-Language Refactoring
-**Context**: You're migrating from Python 2 → 3 + adding type hints.
+The critical lesson was:
 
-**Command**:
+- **weight compression** and **KV cache control** are different problems
+- even if weights fit, the service can still fail when KV cache is allocated
+
+That is why the final working route used:
+
+- **W8A8 quantization** for the model
+- a **hard cap** on GPU/NPU KV blocks
+
+## How the W8A8 Model Was Produced
+
+The final serving model was not downloaded directly as a public W8A8 artifact. It was produced from the original model using **ModelSlim**.
+
+The model that was ultimately served was:
+
 ```bash
-$ qwen-cli --repo . "Add Python 3.11 type hints to all modules. 
-Preserve existing logic. Update tests."
+/home/ma-user/work/models/Qwen3-Coder-Next-w8a8-from-30011
 ```
 
-**Before**:
-```python
-def process_payment(amount, currency):
-    # legacy code
-    pass
-```
+This model came from an earlier successful quantization run on another notebook.
 
-**After**:
-```python
-from decimal import Decimal
-from typing import Literal
+The important detail is that the successful quantization path was the **ModelSlim CLI**, not the older speculative `Qwen3-MOE` example script.
 
-def process_payment(
-    amount: Decimal, 
-    currency: Literal["USD", "BRL", "EUR"]
-) -> dict[str, str | Decimal]:
-    # legacy code preserved
-    pass
-```
+The working quantization pattern was:
 
-**Impact**: 12,000 lines refactored, 100% test pass rate, 2 days of work → 30 minutes.
-
----
-
-## Technical Deep Dive
-
-### Architecture
-- **Base Model**: Qwen2.5 (pre-trained LLM)
-- **Fine-Tuning**: CodeLlama-style instruction tuning + RLHF
-- **Context Window**: 128K tokens (~400 pages of code)
-- **Quantization**: INT4/INT8 support (run 14B model on 8GB VRAM)
-
-### Benchmark Performance
-| Task | Qwen3-Coder 7B | GPT-4 Turbo | Claude Sonnet 3.5 |
-|------|----------------|-------------|-------------------|
-| HumanEval | **89.2%** | 90.2% | 92.0% |
-| MBPP | **82.5%** | 85.4% | 87.1% |
-| LiveCodeBench | **67.3%** | 72.1% | 70.8% |
-| Cost (1M tokens) | **$0.00** | $10.00 | $15.00 |
-
-*Note: Self-hosted Qwen3 = zero marginal cost after infra setup.*
-
----
-
-## Getting Started (5 Minutes)
-
-### Option 1: Local Inference (Developers)
 ```bash
-# Install ollama
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Pull Qwen3-Coder
-ollama pull qwen3-coder:7b
-
-# Start coding
-ollama run qwen3-coder:7b "Write a Python decorator for rate limiting"
+python -m msmodelslim.cli quant \
+  --model_path /home/ma-user/work/Qwen3-coder-next \
+  --save_path /home/ma-user/work/Qwen3-coder-next-w8a8 \
+  --device npu \
+  --model_type Qwen3-Next-80B-A3B-Instruct \
+  --quant_type w8a8 \
+  --trust_remote_code True
 ```
 
-### Option 2: Cloud Deployment (Production)
-```yaml
-# docker-compose.yml
-services:
-  qwen-api:
-    image: qwen/qwen3-coder:14b-awq
-    ports:
-      - "8000:8000"
-    environment:
-      MODEL_PATH: /models/qwen3-coder-14b
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+Successful quantization was confirmed by log signals such as:
+
+- `model.layers.0` through `model.layers.47`
+- `FlexSmoothQuantProcessor`
+- `AscendV1Saver`
+- `QUANTIZATION: END`
+- `SUCCESS`
+
+The quantized output contained:
+
+- `config.json`
+- `quant_model_description.json`
+- `quant_model_weights.safetensors.index.json`
+- `quant_model_weights-00001-of-00019.safetensors` through `00019-of-00019`
+
+## Moving Large Models Between Notebooks
+
+Downloading a very large model repeatedly from ModelScope is slow and fragile. In practice, it was often faster to move the model directory from one notebook to another.
+
+The reliable rule was:
+
+- do **not** use the public notebook ingress host and external SSH port for notebook-to-notebook transfer
+- do use **private IP + the notebook's internal SSH daemon**
+
+For large model directories, a streaming transfer worked well:
+
+```bash
+tar -C /source/root -cf - model_dir | ssh target 'tar -C /dest/root -xf -'
 ```
 
-Deploy to AWS/GCP/Azure with GPU instances (~$1.50/hour spot pricing).
+Two operational lessons mattered:
 
----
+1. Never transfer into a directory that is still being downloaded.
+2. Always use a unique destination directory name first, then switch later if needed.
 
-## When NOT to Use Qwen3-Coder
+That avoided silent merges between:
 
-**Avoid if**:
-- You need cutting-edge reasoning (GPT-4/Claude still lead on novel algorithms)
-- Team has zero ML infra experience (managed APIs are easier)
-- Compliance requires SOC2-certified vendors
+- an incomplete local download
+- and a transferred complete copy
 
-**Better alternatives**:
-- OpenAI Codex (for enterprise compliance)
-- GitHub Copilot (for simplicity)
+## The Real Deployment Breakthrough
 
----
+The final success did not come from one single version bump. It came from a set of choices that worked together.
 
-## The Startup Playbook
+### 1. Use `spawn`, not `fork`
 
-### Phase 1: Seed Stage (0-10 engineers)
-- **Tool**: Qwen3-Coder 7B (local laptops)
-- **Use Case**: Prototyping, boilerplate generation
-- **Cost**: $0
+Older `vllm-ascend` rescue paths sometimes relied on:
 
-### Phase 2: Series A (10-50 engineers)
-- **Tool**: Qwen3-Coder 14B (self-hosted API)
-- **Use Case**: Code review automation, refactoring sprints
-- **Cost**: ~$500/month (GPU infra)
+```bash
+VLLM_WORKER_MULTIPROC_METHOD=fork
+```
 
-### Phase 3: Series B+ (50+ engineers)
-- **Tool**: Hybrid (Qwen3 + GPT-4 for edge cases)
-- **Use Case**: Developer productivity platform
-- **ROI**: 30% faster shipping velocity
+That was **not** the working answer on the final `0.17` stack.
 
----
+On the successful host and package set:
 
-## Future Roadmap
+- `fork` produced:
+  - `Invalid thread pool!`
+- `spawn` was the correct mode
 
-Qwen team announced:
-- **Qwen3-Coder-32B** (April 2026): Match GPT-4 on complex reasoning
-- **Fine-tuning toolkit**: Domain-specific models (FinTech, Healthcare, etc.)
-- **VSCode extension**: Native IDE integration
+This was the working choice:
 
----
+```bash
+VLLM_WORKER_MULTIPROC_METHOD=spawn
+```
+
+### 2. Keep CPU thread counts pinned to 1
+
+The stable route also used:
+
+```bash
+OMP_NUM_THREADS=1
+MKL_NUM_THREADS=1
+OPENBLAS_NUM_THREADS=1
+NUMEXPR_NUM_THREADS=1
+```
+
+This was not about peak throughput. It was about keeping worker startup and runtime behavior stable on this stack.
+
+### 3. Treat KV cache as a separate memory budget
+
+The deployment remained stable only because KV cache growth was constrained explicitly:
+
+```bash
+--num-gpu-blocks-override 512
+```
+
+That setting prevented the service from consuming the entire remaining memory budget during KV cache initialization.
+
+This is the main reason the deployment was later able to move from a smaller context window to a working:
+
+```bash
+--max-model-len 4096
+```
+
+### 4. The quantization flag was mandatory
+
+Because the model was produced by ModelSlim, serving had to use:
+
+```bash
+--quantization ascend
+```
+
+Without this, the deployment would not be using the quantized artifact correctly.
+
+## Final Working Serve Command
+
+This is the final serve shape that worked:
+
+```bash
+vllm serve /home/ma-user/work/models/Qwen3-Coder-Next-w8a8-from-30011 \
+  --host 127.0.0.1 \
+  --port 8008 \
+  --served-model-name qwen3-coder-next \
+  --tensor-parallel-size 8 \
+  --data-parallel-size 1 \
+  --max-model-len 4096 \
+  --max-num-seqs 16 \
+  --gpu-memory-utilization 0.45 \
+  --num-gpu-blocks-override 512 \
+  --quantization ascend \
+  --trust-remote-code
+```
+
+Supporting environment:
+
+```bash
+ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+VLLM_WORKER_MULTIPROC_METHOD=spawn
+VLLM_USE_MODELSCOPE=False
+PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
+HCCL_OP_EXPANSION_MODE=AIV
+OMP_NUM_THREADS=1
+MKL_NUM_THREADS=1
+OPENBLAS_NUM_THREADS=1
+NUMEXPR_NUM_THREADS=1
+```
+
+## What Was Successfully Verified
+
+The final service was not treated as successful just because the process stayed alive.
+
+Success was confirmed with:
+
+- `GET /v1/models` returning `200`
+- `POST /v1/chat/completions` returning `200`
+- real text output from the model
+
+In other words, this was not just a "port is open" result. The model completed actual inference requests successfully.
+
+## The Triton Warning That Did Not Block Deployment
+
+One warning still appeared during startup:
+
+```text
+No module named 'triton.language.target_info'
+```
+
+This looked alarming, but in the final deployment it was **non-blocking**.
+
+That conclusion was based on actual behavior:
+
+- the service started
+- `/v1/models` worked
+- `chat/completions` worked
+
+So the practical rule is:
+
+- do not ignore it blindly in every environment
+- but do not treat it as an automatic deployment failure on this exact `0.17 + CANN 8.5.1` stack if real inference succeeds
+
+## Performance Measurements
+
+With the successful deployment running on `8` NPUs, the measured short-prompt performance was approximately:
+
+- **Time to first token (TTFT)**: `~0.70s`
+- **Overall generation rate**: `~11.36 tok/s`
+- **Post-first-token decode rate**: `~13 tok/s`
+
+These numbers were measured on short prompts and short completions.
+
+The more important result for real coding-agent style usage was that the service also handled larger prompts after moving to `4096` context:
+
+- about `1035` prompt tokens + `256` completion tokens: success
+- about `2045` prompt tokens + `256` completion tokens: success
+
+That was a major improvement over the earlier `1024` context configuration, which could reject longer requests immediately.
+
+## Model Output Quality: Deployment Success Is Not The Same As Production Quality
+
+The deployment was successful. That does **not** mean every generation was production-grade.
+
+When tested on multiple coding tasks, the model behaved like this:
+
+- deployment and inference pipeline: stable
+- code editing / bug fixing: relatively strong
+- clean-sheet code generation: mixed quality
+
+Examples from testing:
+
+- one clean code-generation case returned a function with indentation issues and an incorrect example output
+- a code-repair scenario worked correctly and produced syntactically valid Python
+
+So the fair engineering conclusion is:
+
+- the service is usable
+- the model can help with coding tasks
+- but generation quality still needs task-specific evaluation before production use
+
+This deployment solved the infrastructure problem. It did not eliminate the need for application-level evaluation.
+
+## Mistakes Worth Avoiding
+
+Several bad assumptions cost time during earlier attempts.
+
+Do not repeat these:
+
+1. **Do not trust the notebook image label without checking the actual visible CANN/toolkit files.**
+2. **Do not assume `fork` remains the right answer across stack upgrades.**
+3. **Do not assume W8A8 alone fixes memory problems without KV cache limits.**
+4. **Do not transfer a complete model into a directory that is already being downloaded.**
+5. **Do not treat `triton.language.target_info` as an automatic blocker on this exact final stack.**
+6. **Do not copy an `x86_64` helper binary, such as `opencode`, onto an `aarch64` notebook and expect it to run.**
+
+## Recommended Validation Checklist
+
+If you want to reproduce this deployment cleanly, validate in this order:
+
+1. Check actual toolkit and driver versions.
+2. Verify `8` visible NPUs from the target environment.
+3. Verify the quantized model directory is complete.
+4. Confirm the serving environment contains the expected Python package versions.
+5. Start the service with `spawn`, not `fork`.
+6. Verify `/v1/models`.
+7. Verify one real `chat/completions` request.
+8. Only then benchmark latency, throughput, or long-context behavior.
 
 ## Conclusion
 
-For startups optimizing for **speed + cost + control**, Qwen3-Coder is a no-brainer:
-- ✅ Open-source (no vendor lock-in)
-- ✅ Multi-lingual (global teams)
-- ✅ Repository-aware (real refactoring, not snippets)
-- ✅ Self-hosted (predictable costs at scale)
+The final successful path for Qwen3-Coder-Next on Ascend was:
 
-The era of $10K/month AI coding bills is over. The question isn't whether to adopt Qwen3—it's **how fast** you can integrate it.
+- **not BF16**
+- **not the old `0.11` patched route**
+- **not `fork`**
+
+It was:
+
+- `CANN 8.5.1`
+- `vllm 0.17.0`
+- `vllm-ascend 0.17.0rc1`
+- `W8A8` quantization produced by ModelSlim
+- `spawn`
+- `8` NPUs
+- explicit KV cache control with `--num-gpu-blocks-override 512`
+- and final serving at `max_model_len=4096`
+
+That combination finally moved the problem from "cannot start the model" to "the service is up, inference works, and output quality can now be evaluated like a normal model-serving problem."
 
 ---
 
-## Resources
-- 📦 [Qwen3-Coder Models (Hugging Face)](https://huggingface.co/Qwen)
-- 📖 [Official Documentation](https://qwen.readthedocs.io)
-- 💬 [Community Discord](https://discord.gg/qwen)
-- 🛠️ [Starter Templates (GitHub)](https://github.com/QwenLM/Qwen-Coder-Templates)
+## Appendix: Final Working Startup Script
 
----
+The script below captures the final working deployment shape and intentionally avoids the stale self-killing `pkill` pattern that caused earlier startup confusion.
 
-**About the Author**: Robin leads cloud strategy in LATAM, helping startups scale AI infrastructure without breaking the bank. Follow for more posts on cost-optimized AI tooling.
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-*Published: March 28, 2026*
+MODEL_PATH="${MODEL_PATH:-/home/ma-user/work/models/Qwen3-Coder-Next-w8a8-from-30011}"
+PORT="${PORT:-8008}"
+TP_SIZE="${TP_SIZE:-8}"
+DP_SIZE="${DP_SIZE:-1}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-16}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.45}"
+NUM_GPU_BLOCKS_OVERRIDE="${NUM_GPU_BLOCKS_OVERRIDE:-512}"
+SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3-coder-next}"
+LOG_DIR="${LOG_DIR:-/home/ma-user/work/logs}"
+LOG_FILE="${LOG_FILE:-${LOG_DIR}/qwen3_coder_next_w8a8_v017_spawn_4096.log}"
+PID_FILE="${PID_FILE:-${LOG_DIR}/qwen3_coder_next_w8a8_v017_spawn_4096.pid}"
+UNIFIED_ENV="${UNIFIED_ENV:-/home/ma-user/work/venvs/unified-py311}"
+
+mkdir -p "${LOG_DIR}"
+
+[ -d "${MODEL_PATH}" ] || { echo "[ERROR] MODEL_PATH not found: ${MODEL_PATH}"; exit 1; }
+[ -f "${MODEL_PATH}/config.json" ] || { echo "[ERROR] config.json not found under ${MODEL_PATH}"; exit 1; }
+[ -d "${UNIFIED_ENV}" ] || { echo "[ERROR] Unified env not found: ${UNIFIED_ENV}"; exit 1; }
+
+set +u
+source "${UNIFIED_ENV}/bin/activate"
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+if [ -f /usr/local/Ascend/nnal/atb/set_env.sh ]; then
+  source /usr/local/Ascend/nnal/atb/set_env.sh
+fi
+set -u
+
+export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
+export VLLM_WORKER_MULTIPROC_METHOD="${VLLM_WORKER_MULTIPROC_METHOD:-spawn}"
+export VLLM_USE_MODELSCOPE="${VLLM_USE_MODELSCOPE:-False}"
+export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-expandable_segments:True}"
+export HCCL_OP_EXPANSION_MODE="${HCCL_OP_EXPANSION_MODE:-AIV}"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
+
+if [ -f "${PID_FILE}" ]; then
+  OLD_PID="$(cat "${PID_FILE}" || true)"
+  if [ -n "${OLD_PID}" ] && kill -0 "${OLD_PID}" >/dev/null 2>&1; then
+    kill "${OLD_PID}" || true
+    sleep 5
+    kill -9 "${OLD_PID}" >/dev/null 2>&1 || true
+  fi
+  rm -f "${PID_FILE}"
+fi
+
+nohup vllm serve "${MODEL_PATH}" \
+  --host 127.0.0.1 \
+  --port "${PORT}" \
+  --served-model-name "${SERVED_MODEL_NAME}" \
+  --tensor-parallel-size "${TP_SIZE}" \
+  --data-parallel-size "${DP_SIZE}" \
+  --max-model-len "${MAX_MODEL_LEN}" \
+  --max-num-seqs "${MAX_NUM_SEQS}" \
+  --gpu-memory-utilization "${GPU_MEM_UTIL}" \
+  --num-gpu-blocks-override "${NUM_GPU_BLOCKS_OVERRIDE}" \
+  --quantization ascend \
+  --trust-remote-code \
+  > "${LOG_FILE}" 2>&1 &
+
+NEW_PID=$!
+echo "${NEW_PID}" > "${PID_FILE}"
+
+echo "[INFO] Started. PID=${NEW_PID}"
+echo "[INFO] Log: ${LOG_FILE}"
+echo "[INFO] PID file: ${PID_FILE}"
+sleep 3
+tail -n 40 "${LOG_FILE}" || true
+```
