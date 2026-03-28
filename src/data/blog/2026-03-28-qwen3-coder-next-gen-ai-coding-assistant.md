@@ -1,3 +1,22 @@
+---
+author: Robin
+pubDatetime: 2026-03-28T11:55:00-03:00
+title: "Qwen3-Coder: The Next-Gen AI Coding Assistant for Startups"
+description: "Open-source, multi-lingual, and powerful enough to rival GPT-4 on coding tasks—without the API bills. A comprehensive guide for startups looking to optimize AI coding costs while maintaining quality."
+tags:
+  - ai-coding
+  - qwen3
+  - cost-optimization
+  - startup-tools
+  - open-source
+  - llm
+  - developer-productivity
+  - code-generation
+  - self-hosted
+featured: true
+draft: false
+---
+
 # Qwen3-Coder: The Next-Gen AI Coding Assistant for Startups
 
 **TL;DR**: Qwen3-Coder is changing the game for lean engineering teams. Open-source, multi-lingual, and powerful enough to rival GPT-4 on coding tasks—without the API bills.
