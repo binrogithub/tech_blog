@@ -2,7 +2,7 @@
 author: Robin
 pubDatetime: 2026-04-18T14:40:00-03:00
 title: "Why I Created Huawei Cloud Adoption Skills: Helping AI Agents Use Huawei Cloud Faster, More Accurately, and More Reliably"
-description: "Why I created the open source Huawei Cloud Adoption Skills project, and how scenario-first skill packages can help AI agents support real Huawei Cloud delivery work with more speed, accuracy, and reuse."
+description: "Why I created Huawei Cloud Adoption Skills: an open source, scenario-first framework that helps AI agents support Huawei Cloud migration, architecture, operations, and modernization work with greater accuracy, speed, and reuse."
 tags:
   - huawei-cloud
   - ai-agents
@@ -10,6 +10,10 @@ tags:
   - open-source
   - enterprise-ai
   - cloud-delivery
+  - cloud-migration
+  - architecture
+  - huawei-cloud-skills
+  - ai-for-cloud
 featured: false
 draft: false
 ---
