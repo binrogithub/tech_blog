@@ -26,6 +26,8 @@ A large model may know how to write code, summarize architecture, or explain API
 
 That is why I created the open source project **Huawei Cloud Adoption Skills**.
 
+**Project repository:** <https://github.com/binrogithub/1-3-Cloud-Adoption-Skills>
+
 The goal of this project is simple: make it possible for AI Agents to use Huawei Cloud **faster, more accurately, and more efficiently**, while continuously accumulating Huawei Cloud best practices into reusable assets.
 
 ## The Problem: AI Is Powerful, But Cloud Delivery Is Context-Heavy
