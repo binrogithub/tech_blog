@@ -1,3 +1,22 @@
+---
+author: Robin
+pubDatetime: 2026-04-20T12:00:00-03:00
+title: "Building a LangGraph-Based CSS Elasticity AIOps Agent"
+description: "A production-oriented guide to building a Huawei Cloud CSS Elasticity AIOps agent with LangGraph, metrics collection, AI-assisted scaling decisions, deterministic safety checks, and persistent operational state."
+tags:
+  - huawei-cloud
+  - css
+  - aiops
+  - langgraph
+  - ai-agent
+  - autoscaling
+  - opensearch
+  - elasticsearch
+  - cloud-operations
+featured: false
+draft: false
+---
+
 # Building a LangGraph-Based CSS Elasticity AIOps Agent
 
 Project repository: https://github.com/binrogithub/css-elasticity-aiops-agent
