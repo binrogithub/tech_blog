@@ -1,8 +1,9 @@
 ---
 author: Robin
 pubDatetime: 2026-06-22T09:15:00-03:00
+modDatetime: 2026-06-22T10:35:00-03:00
 title: "Deploying Qwen3.6-27B-W8A8 on Huawei Ascend 910B with vLLM Ascend"
-description: "A field-tested deployment guide for Qwen3.6-27B-W8A8 on Huawei Ascend 910B/A2 with vLLM Ascend 0.18.0rc1, covering the working Python 3.11 stack, Triton Ascend wheels, custom kernels, eager serving, and failure analysis."
+description: "A field-tested deployment guide for Qwen3.6-27B-W8A8 on Huawei Ascend 910B/A2 with vLLM Ascend v0.19.1rc1 and vLLM v0.19.1, covering CANN 8.5.2, Python 3.11, torch-npu 2.9, Triton Ascend, native kernels, ATB, graph mode, and the failure fixes needed to make deployment repeatable."
 tags:
   - huawei-cloud
   - ascend
@@ -19,94 +20,130 @@ draft: false
 
 # Deploying Qwen3.6-27B-W8A8 on Ascend 910B3/A2 with vLLM Ascend
 
-This is a deployment write-up from a real ModelArts Ascend 910B3 session. The original goal looked simple: serve `Qwen3.6-27B-w8a8` with vLLM Ascend. The actual lesson was stricter: Qwen3.6-27B is a Qwen3-Next-style hybrid model, and the deployment only becomes repeatable when the Python ABI, Triton Ascend wheel, torch-npu wheel, vLLM Ascend native extension, and serving mode all line up.
+This is a field deployment note from a real Huawei ModelArts Ascend 910B3 session. The target was `Qwen3.6-27B-w8a8`, an Ascend W8A8 quantized Qwen3.6 model, served through vLLM Ascend.
 
-The final working path was **not** the Python 3.12 venv path. Python 3.12 was useful for debugging, and it even built some pieces later, but it was not the clean reproducible route for this model. The reproducible route is:
+The first working environment used vLLM Ascend `0.18.0rc1` in eager mode. That was useful as a safety baseline, but it was not the final answer: graph mode still failed. The final validated route upgraded the stack to **vLLM Ascend `v0.19.1rc1` with vLLM `v0.19.1`**, kept the host CANN at **8.5.2**, loaded the ATB runtime, and fixed both build-time and runtime compiler selection.
 
-- Python 3.11 environment.
-- `vllm-ascend 0.18.0rc1`.
-- `vllm 0.18.0`.
-- `torch 2.9.0`.
-- `torch-npu 2.9.0.post1+gitee7ba04`.
-- `triton-ascend 3.2.0.dev20260322`.
-- Full `vllm_ascend_C` custom kernels built and importable.
-- `--enforce-eager` for Qwen3.6 on this stack.
-- Text-only serving by disabling image/video prompt limits unless you intentionally need multimodal profiling.
+The validated one-card smoke test used:
 
-The validated target machine had one visible Ascend `910B3` card, 64GB HBM, and CANN 8.5.2. The model ran as a one-card constrained deployment at 4K, 8K, and 16K context in eager mode. Official docs recommend a larger A2/A3 node and TP=2 for the full long-context W8A8 recipe; the one-card deployment is a pragmatic constrained setup, not the official performance configuration.
+- Ascend `910B3`, 64 GB HBM, visible as one NPU.
+- CANN `8.5.2`, already present in the container.
+- Python `3.11` under persistent storage.
+- vLLM `0.19.1+empty`, built from `v0.19.1`.
+- vLLM Ascend source checked out at `v0.19.1rc1`.
+- torch `2.9.0`.
+- torch-npu `2.9.0.post1+gitee7ba04`.
+- triton-ascend `3.2.0.dev20260322`.
+- `Qwen3.6-27B-w8a8` from ModelScope.
+- `--quantization ascend`.
+- `FULL_DECODE_ONLY` graph mode.
 
-## What Worked
+The final graph-mode service successfully returned both `/v1/models` and `/v1/chat/completions` responses.
 
-- Model: `/home/ma-user/work/Qwen3.6-27B-w8a8`.
-- Persistent Python env: `/home/ma-user/work/venvs/vllm-ascend-py311`.
-- Source tree for successful native build: `/home/ma-user/work/vllm-ascend-src-py311`.
-- Compiler: GCC/G++ 12.4.0 under `/home/ma-user/work/conda-gcc`.
-- Working mode: eager.
-- Validated contexts: 4K, 8K, 16K.
-- Validated APIs: `/v1/completions` and `/v1/chat/completions`.
+## Final State
 
-## What Did Not Work
+The final environment paths were:
 
-- Treating Python 3.12 as the primary route.
-- Installing `triton-ascend 3.2.1` and expecting Qwen3-Next kernels to work.
-- Running without `vllm_ascend_C`.
-- Graph/compile mode (`PIECEWISE` or `FULL_DECODE_ONLY`) on this exact stack.
-- CPU KV offload with `OffloadingConnector`.
+| Item | Path |
+|---|---|
+| Model | `/home/ma-user/work/Qwen3.6-27B-w8a8` |
+| Python env | `/home/ma-user/work/venvs/vllm-ascend-0191-py311` |
+| vLLM source | `/home/ma-user/work/src/vllm-0191` |
+| vLLM Ascend source | `/home/ma-user/work/src/vllm-ascend` |
+| Logs | `/home/ma-user/work/logs` |
+| Start scripts | `/home/ma-user/work/scripts` |
+
+The final package check was:
+
+```text
+vllm: 0.19.1+empty
+vllm-ascend: 0.19.1rc2.dev0+gda421afad.d20260622
+torch: 2.9.0
+torch-npu: 2.9.0.post1+gitee7ba04
+triton-ascend: 3.2.0.dev20260322
+numpy: 1.26.4
+setuptools: 80.9.0
+```
+
+The source refs were:
+
+```text
+vLLM source:        v0.19.1
+vLLM Ascend source: v0.19.1rc1-dirty
+```
+
+The `vllm-ascend` Python metadata reported `0.19.1rc2.dev0+gda421afad.d20260622`, but the checked-out source was the `v0.19.1rc1` tag at commit `da421afad7192dac64e39ae1d32305d57344f3cf`. This is a packaging/version-string detail from the source tree, not a reason to discard the environment. Always record both the Python package metadata and the git ref.
+
+The `-dirty` suffix came from an already dirty `csrc/third_party/catlass` submodule state. It was not reset during the deployment.
+
+## What Changed From the 0.18 Route
+
+The old conclusion was:
+
+- vLLM Ascend `0.18.0rc1`.
+- vLLM `0.18.0`.
+- eager mode only.
+- graph mode failed.
+
+The updated conclusion is:
+
+- vLLM Ascend source at `v0.19.1rc1`.
+- vLLM source at `v0.19.1`.
+- graph mode works after loading ATB and setting a modern runtime compiler.
+- CANN did not need to be upgraded from `8.5.2`.
+
+The most important correction is that CANN `8.5.2` was not the blocker. The blockers were:
+
+1. Build-time C++ compiler selection for the vLLM Ascend extension.
+2. Runtime C++ compiler selection for Triton Ascend JIT.
+3. Missing ATB library path in graph mode.
 
 ## External References
 
 - vLLM Ascend Qwen3.5/Qwen3.6 tutorial: https://docs.vllm.ai/projects/ascend/en/v0.18.0/tutorials/models/Qwen3.5-27B-Qwen3.6-27B.html
-- vLLM Ascend supported model matrix: https://docs.vllm.ai/projects/ascend/en/v0.18.0/user_guide/support_matrix/supported_models.html
-- Qwen3.6-27B model announcement: https://qwen.ai/blog?id=qwen3.6-27b
-- BF16 model on Hugging Face: https://huggingface.co/Qwen/Qwen3.6-27B
-- BF16 model on ModelScope: https://modelscope.cn/models/Qwen/Qwen3.6-27B
-- W8A8 model on ModelScope: https://modelscope.cn/models/Eco-Tech/Qwen3.6-27B-w8a8
+- vLLM Ascend release notes: https://docs.vllm.ai/projects/ascend/en/main/user_guide/release_notes.html
+- vLLM Ascend repository: https://github.com/vllm-project/vllm-ascend
+- vLLM repository: https://github.com/vllm-project/vllm
+- Qwen3.6-27B BF16 on Hugging Face: https://huggingface.co/Qwen/Qwen3.6-27B
+- Qwen3.6-27B BF16 on ModelScope: https://modelscope.cn/models/Qwen/Qwen3.6-27B
+- Qwen3.6-27B-W8A8 on ModelScope: https://modelscope.cn/models/Eco-Tech/Qwen3.6-27B-w8a8
+- Modelers Qwen3.6-27B guide: https://modelers.cn/models/vLLM_Ascend/Qwen3.6-27B
 
 ## Version Matrix
 
-This table is the heart of the deployment. Most failed attempts came from being close but not exact.
+This is the matrix that was actually validated.
 
-| Component | Working value | Why it matters |
+| Component | Validated value | Notes |
 |---|---:|---|
-| Python | `3.11` | The critical Triton Ascend wheel was available as cp310/cp311, not cp312. |
-| CANN on tested host | `8.5.2` | The host had 8.5.2. Official image lineage referenced 8.5.1/8.5.x; the tested source route worked on the host after native kernels were built. |
-| vLLM Ascend release | `0.18.0rc1` | Qwen3.6-27B is first supported in this release line in the vLLM Ascend docs. |
-| vLLM | `0.18.0` / `0.18.0+empty` | Installed from the pinned vLLM commit with `VLLM_TARGET_DEVICE=empty`. |
-| vLLM commit | `bcf2be96120005e9aea171927f85055a6a5c0cf6` | Modelers/source route pin. |
-| vLLM Ascend commit | `99e1ea0fe685e93f53ee5adfe4b41cdd42fb809f` | Modelers/source route pin. |
-| Transformers commit | `fc9137225880a9d03f130634c20f9dbe36a7b8bf` | Modelers/source route pin; runtime showed Transformers `4.57.x`. |
-| torch | `2.9.0+cpu` | Normal for this Ascend Python stack; NPU is provided by torch-npu. |
-| torch-npu | `2.9.0.post1+gitee7ba04` | The cp311 wheel used in the working env. Plain `2.9.0` was not enough to close the final gap. |
-| triton-ascend | `3.2.0.dev20260322` | Required because Qwen3-Next/GDN path needs `triton.language.extract_slice`; `3.2.1` was wrong for this deployment. |
-| vLLM Ascend native extension | `vllm_ascend_C.cpython-311-aarch64-linux-gnu.so` | Must exist. It provides custom ops such as `npu_gemma_rms_norm`. |
-| Compiler | GCC/G++ `12.4.0` | System GCC 7.3 cannot compile PyTorch/Triton C++17 pieces. |
+| Python | `3.11` | Keep the deployment on Python 3.11. Do not use Python 3.12 as the main route. |
+| CANN | `8.5.2` | Already installed in the container. It did not need to change for this upgrade. |
+| torch | `2.9.0` | CPU wheel name is normal in this stack; NPU support comes from torch-npu. |
+| torch-npu | `2.9.0.post1+gitee7ba04` | Validated wheel. |
+| triton-ascend | `3.2.0.dev20260322` | Validated with Qwen3.6/GDN path. |
+| vLLM | `0.19.1+empty` | Built from `v0.19.1` with `VLLM_TARGET_DEVICE=empty`. |
+| vLLM Ascend | source tag `v0.19.1rc1` | Package metadata may show a dev version from the same commit. |
+| numpy | `1.26.4` | Pinned back from NumPy 2.x to avoid compatibility churn. |
+| opencv-python-headless | `4.11.0.86` | vLLM Ascend pins this lower than the newest vLLM dependency request. |
+| setuptools | `80.9.0` | Setuptools 82 removed behavior needed by torchair imports using `pkg_resources`. |
+| GCC/G++ for Python extension | conda GCC/G++ `15` | Needed because PyTorch extension headers require GCC 9+. |
+| GCC/G++ for CANN custom ops | system GCC `7.3` | CANN custom ops built successfully when not forced to use conda GCC globally. |
+| GCC/G++ for Triton runtime JIT | conda G++ `15` via `CC`/`CXX` | Needed at serve time. |
 
-The important correction: **Python 3.12 was not the successful deployment route.** In the logs, Python 3.12 initially failed because the available `triton-ascend 3.2.1` did not provide the needed Qwen3-Next behavior. The correct `triton-ascend 3.2.0.dev20260322` wheel was available for cp311, and the official image family is Python 3.11 oriented.
+There were non-blocking `pip check` warnings:
 
-The working import check looked like this:
-
-```text
-python 3.11.x
-torch 2.9.0+cpu
-torch_npu 2.9.0.post1+gitee7ba04
-triton extract_slice: True
-vllm 0.18.0
-vllm_ascend_C: vllm_ascend_C.cpython-311-aarch64-linux-gnu.so
-npu_gemma_rms_norm: True
-```
-
-If `triton extract_slice` is false, this deployment is not healthy. If `vllm_ascend_C` is missing, this deployment is not healthy. If `npu_gemma_rms_norm` is missing, Qwen3.6 will fail during model forward/profile.
+- `vllm-ascend` wanted `arctic-inference==0.1.1`; that package failed to build with system GCC 7.3 and was not needed for this Qwen serving path.
+- `torch-npu` and `triton-ascend` version strings included local build suffixes.
+- vLLM and vLLM Ascend disagreed on the preferred OpenCV range. The deployment favored the vLLM Ascend pin.
 
 ## Model Download
 
-There are two Qwen3.6-27B model families that are easy to confuse.
+The W8A8 model used here is:
 
-| Model | Purpose |
-|---|---|
-| `Qwen/Qwen3.6-27B` | BF16 base model. Larger memory footprint. |
-| `Eco-Tech/Qwen3.6-27B-w8a8` | Ascend W8A8 quantized model used in this deployment. |
+```text
+Eco-Tech/Qwen3.6-27B-w8a8
+```
 
-For the W8A8 deployment, download the W8A8 model:
+Download it to persistent ModelArts storage:
 
 ```bash
 mkdir -p /home/ma-user/work
@@ -116,8 +153,6 @@ modelscope download \
   --model Eco-Tech/Qwen3.6-27B-w8a8 \
   --local_dir /home/ma-user/work/Qwen3.6-27B-w8a8
 ```
-
-Use persistent storage. On ModelArts, `/root` and parts of the base conda tree may be ephemeral; `/home/ma-user/work` is the safe storage mount.
 
 Progress check:
 
@@ -131,615 +166,487 @@ Expected size from the tested download:
 34G    /home/ma-user/work/Qwen3.6-27B-w8a8
 ```
 
-If you started a Hugging Face download first and then switch to ModelScope, stop the downloader and delete the partial download/cache. Mixed partial weights create confusing model-load failures.
+If you started a Hugging Face download first and switch to ModelScope later, stop the old process and remove the partial files. Mixing partial HF and ModelScope artifacts makes model-load failures harder to diagnose.
 
-## Preferred Route: Official vLLM Ascend Image
+## Build the Python 3.11 Environment
 
-The official route should be preferred whenever possible. The source/venv route is useful when Docker is unavailable or when you need to patch vLLM Ascend, but most production teams should start with the image.
-
-The vLLM Ascend documentation says Qwen3.6-27B is first supported in `vllm-ascend:v0.18.0rc1`. The docs also show that Qwen3.6-27B-w8a8 uses `--quantization ascend` and a TP=2 serve recipe for long context.
-
-Example shape:
-
-```bash
-export IMAGE=quay.io/ascend/vllm-ascend:v0.18.0rc1
-export NAME=vllm-ascend-qwen36
-
-docker run --rm -it \
-  --name "${NAME}" \
-  --net=host \
-  --shm-size=100g \
-  --device /dev/davinci0 \
-  --device /dev/davinci1 \
-  --device /dev/davinci_manager \
-  --device /dev/devmm_svm \
-  --device /dev/hisi_hdc \
-  -v /usr/local/dcmi:/usr/local/dcmi \
-  -v /usr/local/Ascend/driver/tools/hccn_tool:/usr/local/Ascend/driver/tools/hccn_tool \
-  -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
-  -v /usr/local/Ascend/driver/lib64/:/usr/local/Ascend/driver/lib64/ \
-  -v /usr/local/Ascend/driver/version.info:/usr/local/Ascend/driver/version.info \
-  -v /etc/ascend_install.info:/etc/ascend_install.info \
-  -v /home/ma-user/work:/home/ma-user/work \
-  "${IMAGE}" bash
-```
-
-Adjust the image tag to the exact A2/A3 tag available in your registry. Adjust `/dev/davinci*` devices to the cards assigned to your job.
-
-The official long-context W8A8 command from the docs is conceptually:
-
-```bash
-export VLLM_USE_MODELSCOPE=True
-export PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
-export HCCL_BUFFSIZE=512
-export OMP_PROC_BIND=false
-export OMP_NUM_THREADS=1
-export TASK_QUEUE_ENABLE=1
-
-vllm serve Eco-Tech/Qwen3.6-27B-w8a8 \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --data-parallel-size 1 \
-  --tensor-parallel-size 2 \
-  --seed 1024 \
-  --quantization ascend \
-  --served-model-name qwen3.6 \
-  --max-num-seqs 32 \
-  --max-model-len 262144 \
-  --max-num-batched-tokens 8096 \
-  --trust-remote-code \
-  --gpu-memory-utilization 0.90 \
-  --no-enable-prefix-caching \
-  --speculative_config '{"method": "qwen3_5_mtp", "num_speculative_tokens": 3, "enforce_eager": true}' \
-  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY"}' \
-  --additional-config '{"enable_cpu_binding":true}' \
-  --async-scheduling
-```
-
-On the tested one-card 910B3 environment, this full official long-context TP=2 target could not be reproduced directly because only one card was visible. The stable one-card route used reduced context and eager mode, described below.
-
-## Source Route That Actually Worked: Python 3.11
-
-Use this when you cannot use the official image or need to reproduce the notebook environment. Do not start from Python 3.12 for this model.
-
-### Persistent Layout
-
-```bash
-mkdir -p /home/ma-user/work/venvs
-mkdir -p /home/ma-user/work/src
-mkdir -p /home/ma-user/work/qwen36_run_record
-```
-
-Recommended final paths:
-
-```text
-/home/ma-user/work/venvs/vllm-ascend-py311
-/home/ma-user/work/vllm-ascend-src-py311
-/home/ma-user/work/conda-gcc
-/home/ma-user/work/Qwen3.6-27B-w8a8
-```
-
-### Create Python 3.11 Environment
-
-Use conda or micromamba, but place the env under `/home/ma-user/work`:
+Create a persistent Python 3.11 environment:
 
 ```bash
 source /home/ma-user/anaconda3/bin/activate
-conda create -p /home/ma-user/work/venvs/vllm-ascend-py311 python=3.11 -y
-conda activate /home/ma-user/work/venvs/vllm-ascend-py311
-python -m pip install -U pip setuptools wheel
+conda create -p /home/ma-user/work/venvs/vllm-ascend-0191-py311 python=3.11 -y
+conda activate /home/ma-user/work/venvs/vllm-ascend-0191-py311
+python -m pip install -U pip wheel
+python -m pip install setuptools==80.9.0
 ```
 
-### Install Modern GCC
-
-System GCC 7.3 is too old. The working deployment used GCC/G++ 12.4:
+Install the base NPU stack:
 
 ```bash
-export PATH=/home/ma-user/work/conda-gcc/bin:${PATH}
-export CC=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-gcc
-export CXX=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-g++
-```
-
-Keep these exports both for building and for serving, because Triton runtime JIT can compile C++ headers at serve time.
-
-### Install the Critical Wheels
-
-The key wheel pair was:
-
-```text
-torch_npu-2.9.0.post1+gitee7ba04-cp311-cp311-manylinux_2_28_aarch64.whl
-triton_ascend-3.2.0.dev20260322-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl
-```
-
-In the tested environment, the ModelArts machine could not reliably fetch the OBS bucket directly. The working approach was to fetch these wheels on a machine that could reach the bucket, validate them as wheels, then copy them to `/home/ma-user/work/`.
-
-Install them into the py311 environment:
-
-```bash
-conda activate /home/ma-user/work/venvs/vllm-ascend-py311
 python -m pip install torch==2.9.0
-python -m pip install /home/ma-user/work/torch_npu-2.9.0.post1+gitee7ba04-cp311-cp311-manylinux_2_28_aarch64.whl
-python -m pip install /home/ma-user/work/triton_ascend-3.2.0.dev20260322-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl
+python -m pip install torch-npu==2.9.0.post1
+python -m pip install triton-ascend==3.2.0.dev20260322
 ```
 
-Then install the runtime dependencies required by vLLM/vLLM Ascend. The exact lock can vary, but the tested environment needed at least:
-
-```bash
-python -m pip install \
-  numpy \
-  pybind11 \
-  transformers \
-  xgrammar \
-  compressed-tensors \
-  numba \
-  quart \
-  einops \
-  fastapi \
-  msgpack \
-  scipy \
-  regex \
-  arctic-inference \
-  torch-c-dlpack-ext
-```
-
-### Install vLLM
-
-```bash
-cd /home/ma-user/work/src
-git clone https://github.com/vllm-project/vllm.git
-cd vllm
-git checkout bcf2be96120005e9aea171927f85055a6a5c0cf6
-VLLM_TARGET_DEVICE=empty python -m pip install -v -e .
-```
-
-### Install Transformers Pin
-
-```bash
-cd /home/ma-user/work/src
-git clone https://github.com/huggingface/transformers.git
-cd transformers
-git reset --hard fc9137225880a9d03f130634c20f9dbe36a7b8bf
-python -m pip install -e .
-```
-
-### Build vLLM Ascend with Custom Kernels
-
-This is the non-negotiable step. Qwen3.6 needs custom Ascend ops. A `COMPILE_CUSTOM_KERNELS=0` install is not enough.
-
-```bash
-cd /home/ma-user/work
-git clone https://github.com/vllm-project/vllm-ascend.git vllm-ascend-src-py311
-cd /home/ma-user/work/vllm-ascend-src-py311
-git checkout 99e1ea0fe685e93f53ee5adfe4b41cdd42fb809f
-git submodule update --init --recursive
-
-source /usr/local/Ascend/ascend-toolkit/set_env.sh
-source /usr/local/Ascend/nnal/atb/set_env.sh
-export PATH=/home/ma-user/work/conda-gcc/bin:${PATH}
-export CC=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-gcc
-export CXX=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-g++
-export C_COMPILER=${CC}
-export CXX_COMPILER=${CXX}
-export COMPILE_CUSTOM_KERNELS=1
-
-python -m pip install -v --no-build-isolation -e .
-```
-
-Successful build markers include:
+In a restricted environment, those wheels may need to be copied in manually. The validated versions were:
 
 ```text
-[100%] Linking CXX shared module vllm_ascend_C.cpython-311-aarch64-linux-gnu.so
-Successfully built vllm_ascend
-Successfully installed vllm_ascend-0.18.0rc1
+torch_npu-2.9.0.post1+gitee7ba04
+triton_ascend-3.2.0.dev20260322
 ```
 
-### Verify the Stack
+Install conda compilers into the same environment:
 
 ```bash
-source /usr/local/Ascend/ascend-toolkit/set_env.sh
-source /usr/local/Ascend/nnal/atb/set_env.sh
-conda activate /home/ma-user/work/venvs/vllm-ascend-py311
+conda install -p /home/ma-user/work/venvs/vllm-ascend-0191-py311 \
+  gcc_linux-aarch64 \
+  gxx_linux-aarch64 \
+  -y
+```
 
-python - <<'PY'
-import torch
-import torch_npu
-import triton.language as tl
+## Build vLLM v0.19.1
+
+Clone and install vLLM:
+
+```bash
+mkdir -p /home/ma-user/work/src
+cd /home/ma-user/work/src
+
+git clone https://github.com/vllm-project/vllm.git vllm-0191
+cd vllm-0191
+git checkout v0.19.1
+
+conda activate /home/ma-user/work/venvs/vllm-ascend-0191-py311
+VLLM_TARGET_DEVICE=empty python -m pip install --no-build-isolation --no-deps -e .
+```
+
+Verify:
+
+```bash
+/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/python - <<'PY'
 import vllm
-import vllm_ascend.vllm_ascend_C as C
-
-print("torch", torch.__version__)
-print("torch_npu", torch_npu.__version__)
-print("triton extract_slice:", hasattr(tl, "extract_slice"))
-print("vllm", vllm.__version__)
-print("vllm_ascend_C:", C.__file__.split("/")[-1])
-print("npu_gemma_rms_norm:", hasattr(torch.ops._C_ascend, "npu_gemma_rms_norm"))
+print(vllm.__version__)
 PY
-```
-
-Do not serve until this check passes.
-
-## Serving Configuration
-
-The constrained one-card deployment used text-only eager mode. It intentionally avoided graph/compile mode and disabled image/video prompt profiling.
-
-### Common Environment
-
-```bash
-source /usr/local/Ascend/ascend-toolkit/set_env.sh
-source /usr/local/Ascend/nnal/atb/set_env.sh
-source /home/ma-user/anaconda3/bin/activate /home/ma-user/work/venvs/vllm-ascend-py311
-
-export PATH=/home/ma-user/work/conda-gcc/bin:${PATH}
-export CC=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-gcc
-export CXX=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-g++
-
-export PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
-export HCCL_OP_EXPANSION_MODE=AIV
-export HCCL_BUFFSIZE=1024
-export OMP_NUM_THREADS=1
-export TASK_QUEUE_ENABLE=1
-```
-
-### 4K Smoke Test
-
-```bash
-vllm serve /home/ma-user/work/Qwen3.6-27B-w8a8 \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --data-parallel-size 1 \
-  --tensor-parallel-size 1 \
-  --seed 1024 \
-  --quantization ascend \
-  --served-model-name qwen3.6 \
-  --max-model-len 4096 \
-  --max-num-batched-tokens 1024 \
-  --max-num-seqs 1 \
-  --gpu-memory-utilization 0.80 \
-  --trust-remote-code \
-  --no-enable-prefix-caching \
-  --limit-mm-per-prompt image=0,video=0 \
-  --enforce-eager \
-  --additional-config '{"enable_cpu_binding":true}'
-```
-
-Validated markers:
-
-```text
-Loading weights took ~151s
-GPU KV cache size: 50,688 tokens
-Maximum concurrency for 4,096 tokens per request: 22.50x
-Application startup complete
-```
-
-### 8K Stable Test
-
-```bash
-vllm serve /home/ma-user/work/Qwen3.6-27B-w8a8 \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --data-parallel-size 1 \
-  --tensor-parallel-size 1 \
-  --seed 1024 \
-  --quantization ascend \
-  --served-model-name qwen3.6 \
-  --max-model-len 8192 \
-  --max-num-batched-tokens 1024 \
-  --max-num-seqs 1 \
-  --gpu-memory-utilization 0.80 \
-  --trust-remote-code \
-  --no-enable-prefix-caching \
-  --limit-mm-per-prompt image=0,video=0 \
-  --enforce-eager \
-  --additional-config '{"enable_cpu_binding":true}'
-```
-
-Validated markers:
-
-```text
-GPU KV cache size: 62,976 tokens
-Maximum concurrency for 8,192 tokens per request: 18.44x
-Application startup complete
-```
-
-### 16K Stable Test
-
-```bash
-vllm serve /home/ma-user/work/Qwen3.6-27B-w8a8 \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --data-parallel-size 1 \
-  --tensor-parallel-size 1 \
-  --seed 1024 \
-  --quantization ascend \
-  --served-model-name qwen3.6 \
-  --max-model-len 16384 \
-  --max-num-batched-tokens 2048 \
-  --max-num-seqs 1 \
-  --gpu-memory-utilization 0.82 \
-  --trust-remote-code \
-  --no-enable-prefix-caching \
-  --limit-mm-per-prompt image=0,video=0 \
-  --enforce-eager \
-  --additional-config '{"enable_cpu_binding":true}'
-```
-
-Validated markers:
-
-```text
-GPU KV cache size: 67,584 tokens
-Maximum concurrency for 16,384 tokens per request: 12.64x
-Application startup complete
-```
-
-Validated request:
-
-```bash
-curl -s http://127.0.0.1:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "qwen3.6",
-    "messages": [{"role": "user", "content": "Say hello in three languages."}],
-    "max_tokens": 60,
-    "temperature": 0
-  }'
-```
-
-### Restart Hygiene
-
-Before restarting, kill old server processes and wait for HBM to fall back to the baseline. In the tested environment the idle HBM baseline was about 3382MB.
-
-```bash
-pgrep -af "bin/vllm serve"
-pkill -f "bin/vllm serve" || true
-sleep 5
-npu-smi info
-```
-
-If you relaunch too quickly, vLLM can fail with:
-
-```text
-ValueError: Free memory on device ... is less than desired GPU memory utilization
-```
-
-That is often stale memory/process cleanup, not a model sizing error.
-
-## Failure Analysis
-
-### Python 3.12 Was the Wrong Primary Route
-
-Python 3.12 looked attractive because the base environment already had it. The mistake was assuming package names were enough. The model needs a specific Triton Ascend capability:
-
-```text
-triton.language.extract_slice
-```
-
-The working wheel was:
-
-```text
-triton_ascend-3.2.0.dev20260322-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl
-```
-
-The accessible Python 3.12 path initially installed `triton-ascend 3.2.1`, but that was not the right functional match for Qwen3-Next. Later py312 native pieces could build, but the reliable deployment route in the run record remained py311 because the required wheel set matched py311.
-
-### Missing `vllm_ascend_C`
-
-This was the most important failure:
-
-```text
-ModuleNotFoundError: No module named 'vllm_ascend.vllm_ascend_C'
-```
-
-and later:
-
-```text
-torch.ops._C_ascend.npu_gemma_rms_norm
-```
-
-`npu_gemma_rms_norm` is not optional for this model path. It lives behind the vLLM Ascend native extension/custom kernels. Installing with `COMPILE_CUSTOM_KERNELS=0` can import Python packages, but Qwen3.6 fails during the first real forward/profile path.
-
-The fix is to build vLLM Ascend with `COMPILE_CUSTOM_KERNELS=1` and verify:
-
-```text
-vllm_ascend_C: vllm_ascend_C.cpython-311-aarch64-linux-gnu.so
-npu_gemma_rms_norm: True
-```
-
-### GCC 7.3 Broke Triton Runtime JIT
-
-Symptom:
-
-```text
-Failed to compile ... precompiled.h.gch
-You're trying to build PyTorch with a too old version of GCC. We need GCC 9 or later.
-cmd=['/usr/bin/g++', ...]
-```
-
-Fix:
-
-```bash
-export PATH=/home/ma-user/work/conda-gcc/bin:${PATH}
-export CC=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-gcc
-export CXX=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-g++
-```
-
-Do this at both build time and serve time.
-
-### Multimodal Profiling Crashed Without Text-Only Limits
-
-Qwen3.6 is multimodal. During startup, vLLM can profile the visual path using dummy image inputs. On the tested environment, this reached a device-side failure around `aclnnIndex`.
-
-For text-only service, disable multimodal prompt profiling:
-
-```bash
---limit-mm-per-prompt image=0,video=0
-```
-
-This is not a cosmetic flag. It changed the startup path.
-
-### Graph Mode Was Not Stable on This Stack
-
-The official long-context recipe recommends `FULL_DECODE_ONLY`. In this tested stack, graph mode could capture but failed on decode or hit Qwen3-Next torch.compile issues:
-
-```text
-qwen3_next.py:1358 -> torch._dynamo call_size
-AttributeError: 'NoneType' has no attribute 'size'
-```
-
-Observed result:
-
-| Mode | Result |
-|---|---|
-| 4K eager | Passed |
-| 8K eager | Passed |
-| 16K eager | Passed |
-| FULL_DECODE_ONLY graph | Startup/capture could pass, first real request failed |
-| PIECEWISE graph/default compile | Failed earlier |
-
-Practical rule for this exact build:
-
-```text
-Use --enforce-eager.
-```
-
-### CPU KV Offload Was Architecturally Incompatible
-
-The tested KV offload attempt used `OffloadingConnector` and failed for a model-architecture reason, not just memory tuning:
-
-```text
-ValueError: Hybrid KV cache manager is disabled but failed to convert the KV cache specs to one unified type.
-```
-
-Qwen3.6 has a hybrid attention/cache design. `OffloadingConnector` disabled the hybrid KV cache manager, then vLLM tried to unify incompatible cache specs. This is not fixed by adding a little memory or changing `gpu_memory_utilization`.
-
-Practical rule:
-
-```text
-Do not use CPU KV offload for this Qwen3.6 stack unless the connector explicitly supports the required hybrid cache path.
-```
-
-## Fast Redeploy Checklist
-
-Use this order. Do not skip verification steps.
-
-### 1. Confirm Hardware and Persistent Storage
-
-```bash
-npu-smi info
-df -h /home/ma-user/work
-```
-
-Expected one-card constrained test environment:
-
-```text
-910B3, 64GB HBM
-/home/ma-user/work on persistent /dev/sdb
-```
-
-### 2. Confirm Model
-
-```bash
-du -sh /home/ma-user/work/Qwen3.6-27B-w8a8
 ```
 
 Expected:
 
 ```text
-~34G
+0.19.1+empty
 ```
 
-### 3. Activate Correct Python Environment
+## Build vLLM Ascend v0.19.1rc1
+
+Clone and checkout the release candidate:
 
 ```bash
-source /home/ma-user/anaconda3/bin/activate /home/ma-user/work/venvs/vllm-ascend-py311
-source /usr/local/Ascend/ascend-toolkit/set_env.sh
-source /usr/local/Ascend/nnal/atb/set_env.sh
+cd /home/ma-user/work/src
+git clone https://github.com/vllm-project/vllm-ascend.git
+cd vllm-ascend
+git checkout v0.19.1rc1
 ```
 
-### 4. Export Compiler Variables
+Install vLLM runtime requirements, then correct the pins that matter for this stack:
 
 ```bash
-export PATH=/home/ma-user/work/conda-gcc/bin:${PATH}
-export CC=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-gcc
-export CXX=/home/ma-user/work/conda-gcc/bin/aarch64-conda-linux-gnu-g++
+conda activate /home/ma-user/work/venvs/vllm-ascend-0191-py311
+python -m pip install -r /home/ma-user/work/src/vllm-0191/requirements/common.txt
+python -m pip install numpy==1.26.4 opencv-python-headless==4.11.0.86 setuptools==80.9.0
 ```
 
-### 5. Run the Critical Import Check
+The native build needs a split-compiler approach:
+
+- Let CANN custom ops use the system compiler expected by the CANN toolchain.
+- Let the Python extension CMake path use the conda GCC/G++ compiler.
+
+Do not globally export `CC` and `CXX` during the build. Instead, pass `C_COMPILER` and `CXX_COMPILER` for the Python extension build:
 
 ```bash
-python - <<'PY'
-import torch, torch_npu
-import triton.language as tl
-import vllm
+cd /home/ma-user/work/src/vllm-ascend
+conda activate /home/ma-user/work/venvs/vllm-ascend-0191-py311
+
+export PATH=/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin:$PATH
+export C_COMPILER=/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/aarch64-conda-linux-gnu-gcc
+export CXX_COMPILER=/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/aarch64-conda-linux-gnu-g++
+
+python -m pip install --no-build-isolation --no-deps -v .
+```
+
+This avoids the failure:
+
+```text
+#error "You're trying to build PyTorch with a too old version of GCC. We need GCC 9 or later."
+```
+
+while still letting the CANN custom-op build complete with the system toolchain.
+
+Verify the native extension:
+
+```bash
+/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/python - <<'PY'
+import importlib.metadata as m
+import torch
+import torch_npu
 import vllm_ascend.vllm_ascend_C as C
-print("torch", torch.__version__)
-print("torch_npu", torch_npu.__version__)
-print("triton extract_slice:", hasattr(tl, "extract_slice"))
-print("vllm", vllm.__version__)
-print("vllm_ascend_C:", C.__file__.split("/")[-1])
-print("npu_gemma_rms_norm:", hasattr(torch.ops._C_ascend, "npu_gemma_rms_norm"))
+
+print("vllm:", m.version("vllm"))
+print("vllm-ascend:", m.version("vllm-ascend"))
+print("torch:", m.version("torch"))
+print("torch-npu:", m.version("torch-npu"))
+print("npu available:", torch.npu.is_available())
+print("vllm_ascend_C:", C)
 PY
 ```
 
-Do not continue if this fails.
+## Required Runtime Environment
 
-### 6. Start 4K First
+Runtime is where the second major compiler problem appears. Triton Ascend reads `CC` for its C++ compiler. If `CC` resolves to `/usr/bin/g++`, the first serve can fail with the same GCC-too-old error.
 
-Use 4K as the fastest real startup test. It still loads the full model, so weight load takes time, but it limits KV/cache pressure.
-
-### 7. Scale to 8K, Then 16K
-
-The tested stable sequence was:
-
-```text
-4K eager -> 8K eager -> 16K eager
-```
-
-Do not jump directly to graph, KV offload, or high concurrency.
-
-### 8. Validate End-to-End
+Set `CC` and `CXX` to conda G++ before serving:
 
 ```bash
-curl -s http://127.0.0.1:8000/v1/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"qwen3.6","prompt":"The capital of France is","max_tokens":24,"temperature":0}'
+export ENV_DIR=/home/ma-user/work/venvs/vllm-ascend-0191-py311
+export CC="$ENV_DIR/bin/aarch64-conda-linux-gnu-g++"
+export CXX="$ENV_DIR/bin/aarch64-conda-linux-gnu-g++"
 ```
 
-and:
-
-```bash
-curl -s http://127.0.0.1:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"qwen3.6","messages":[{"role":"user","content":"Say hello in three languages."}],"max_tokens":60,"temperature":0}'
-```
-
-### 9. Record Runtime Markers
-
-Save these from the log:
+Graph mode also needs ATB. Without ATB, graph mode failed with:
 
 ```text
-Loading weights took ...
-GPU KV cache size ...
-Maximum concurrency ...
-Application startup complete
+OSError: libatb.so: cannot open shared object file: No such file or directory
 ```
 
-Those markers are more useful than a generic "server started" note.
+The fix was:
 
-## Conclusion
+```bash
+source /usr/local/Ascend/nnal/atb/set_env.sh
+```
 
-The deployment became stable only after the stack was treated as a tightly coupled system, not as a set of independent Python packages.
+The full graph runtime environment was:
 
-The decisive fixes were:
+```bash
+ENV_DIR=/home/ma-user/work/venvs/vllm-ascend-0191-py311
+ASCEND_SRC=/home/ma-user/work/src/vllm-ascend
 
-- Move to Python 3.11.
-- Use `triton-ascend 3.2.0.dev20260322`, not `3.2.1`.
-- Use the matching `torch-npu 2.9.0.post1+gitee7ba04` wheel.
-- Build `vllm_ascend_C` with custom kernels enabled.
-- Use GCC/G++ 12.4 at build time and serve time.
-- Disable multimodal prompt profiling for text-only serving.
-- Use eager mode for this Qwen3.6 stack.
+export PATH="$ENV_DIR/bin:$PATH"
+source "$ASCEND_SRC/vllm_ascend/_cann_ops_custom/vendors/vllm-ascend/bin/set_env.bash"
+source /usr/local/Ascend/nnal/atb/set_env.sh
 
-The wrong mental model was "Python 3.12 mostly works, so just patch missing dependencies." That got the service to model loading, but not to a reliable endpoint. The right mental model is "Qwen3.6 depends on Qwen3-Next/GDN-specific Triton and Ascend custom kernels; match the ABI and native extension first, then tune serving."
+export CC="$ENV_DIR/bin/aarch64-conda-linux-gnu-g++"
+export CXX="$ENV_DIR/bin/aarch64-conda-linux-gnu-g++"
+export PYTORCH_NPU_ALLOC_CONF="expandable_segments:True"
+export HCCL_OP_EXPANSION_MODE="AIV"
+export HCCL_BUFFSIZE=1024
+export OMP_NUM_THREADS=1
+export TASK_QUEUE_ENABLE=1
+export LD_PRELOAD="/usr/lib/aarch64-linux-gnu/libjemalloc.so.2:${LD_PRELOAD:-}"
+```
 
-If deploying fresh and Docker is allowed, start from the official vLLM Ascend image for `0.18.0rc1`. If Docker is not available, reproduce the Python 3.11 source route exactly and verify the critical import checks before launching vLLM.
+## Graph Mode Serve Command
 
+This is the validated one-card smoke command. It is intentionally conservative: 4K context, one sequence, and small graph capture sizes.
+
+```bash
+ENV_DIR=/home/ma-user/work/venvs/vllm-ascend-0191-py311
+MODEL_DIR=/home/ma-user/work/Qwen3.6-27B-w8a8
+
+"$ENV_DIR/bin/vllm" serve "$MODEL_DIR" \
+  --host 0.0.0.0 \
+  --port 8010 \
+  --served-model-name qwen3.6-w8a8-graph \
+  --tensor-parallel-size 1 \
+  --seed 1024 \
+  --quantization ascend \
+  --trust-remote-code \
+  --gpu-memory-utilization 0.82 \
+  --max-model-len 4096 \
+  --max-num-seqs 1 \
+  --max-num-batched-tokens 2048 \
+  --no-enable-prefix-caching \
+  --compilation-config '{"cudagraph_capture_sizes":[1,2,4],"cudagraph_mode":"FULL_DECODE_ONLY"}'
+```
+
+The startup log showed:
+
+```text
+FULL_DECODE_ONLY compilation enabled on NPU. use_inductor not supported - using only ACL Graph mode
+Using OOT custom backend for compilation.
+enable_npugraph_ex is enabled, which will bring graph compilation optimization.
+Compiling a graph for compile range (1, 2048) takes 47.28 s
+torch.compile and initial profiling/warmup run together took 108.25 s in total
+Graph capturing finished in 22 secs, took 0.22 GiB
+Starting vLLM server on http://0.0.0.0:8010
+```
+
+The model-load and memory logs were:
+
+```text
+Loading safetensors checkpoint shards: 100% Completed | 9/9
+Loading weights took 155.68 seconds
+Loading model weights took 33.6045 GB
+Available KV cache memory: 13.50 GiB
+GPU KV cache size: 53,760 tokens
+Maximum concurrency for 4,096 tokens per request: 23.67x
+```
+
+Even though the log says "GPU", this is the shared vLLM wording for the accelerator memory path; the device was Ascend NPU.
+
+## API Verification
+
+Check the model list:
+
+```bash
+curl http://127.0.0.1:8010/v1/models
+```
+
+Validated response shape:
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "qwen3.6-w8a8-graph",
+      "object": "model",
+      "owned_by": "vllm",
+      "root": "/home/ma-user/work/Qwen3.6-27B-w8a8",
+      "max_model_len": 4096
+    }
+  ]
+}
+```
+
+Check chat completions:
+
+```bash
+curl -sS --max-time 180 http://127.0.0.1:8010/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3.6-w8a8-graph",
+    "messages": [{"role": "user", "content": "Say OK only."}],
+    "max_tokens": 8,
+    "temperature": 0
+  }'
+```
+
+Validated response status was `200 OK`, with usage:
+
+```json
+{
+  "prompt_tokens": 14,
+  "completion_tokens": 8,
+  "total_tokens": 22
+}
+```
+
+The short prompt returned odd text because the request capped generation at eight tokens, but the important deployment signal was that graph-mode inference completed through the OpenAI-compatible API.
+
+## Reusable Scripts
+
+The final machine had these scripts:
+
+```text
+/home/ma-user/work/scripts/start-vllm-qwen36-w8a8-0191-graph.sh
+/home/ma-user/work/scripts/start-vllm-qwen36-w8a8-0191-eager.sh
+/home/ma-user/work/scripts/stop-vllm-qwen36.sh
+```
+
+Start graph mode:
+
+```bash
+/home/ma-user/work/scripts/start-vllm-qwen36-w8a8-0191-graph.sh
+```
+
+Check logs:
+
+```bash
+tail -f /home/ma-user/work/logs/serve-v0191-graph.log
+```
+
+Stop:
+
+```bash
+/home/ma-user/work/scripts/stop-vllm-qwen36.sh
+```
+
+The graph start script should include the ATB and custom-op env setup:
+
+```bash
+source /home/ma-user/work/src/vllm-ascend/vllm_ascend/_cann_ops_custom/vendors/vllm-ascend/bin/set_env.bash
+source /usr/local/Ascend/nnal/atb/set_env.sh
+export CC=/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/aarch64-conda-linux-gnu-g++
+export CXX=/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/aarch64-conda-linux-gnu-g++
+```
+
+## Eager Fallback
+
+Keep an eager fallback script. Eager mode proved the model, tokenizer, quantization, and native kernels before graph mode was fixed.
+
+```bash
+"$ENV_DIR/bin/vllm" serve "$MODEL_DIR" \
+  --host 0.0.0.0 \
+  --port 8010 \
+  --served-model-name qwen3.6-w8a8 \
+  --tensor-parallel-size 1 \
+  --seed 1024 \
+  --quantization ascend \
+  --trust-remote-code \
+  --gpu-memory-utilization 0.82 \
+  --max-model-len 4096 \
+  --max-num-seqs 1 \
+  --max-num-batched-tokens 2048 \
+  --no-enable-prefix-caching \
+  --enforce-eager
+```
+
+The eager smoke test loaded the same 9 shards, used about 33.6 GB for weights, exposed `/v1/models`, and returned a valid `/v1/chat/completions` response.
+
+## Failure Log and Fixes
+
+### Failure: Python 3.12 as the Main Route
+
+Python 3.12 was the wrong primary route for this deployment. The working stack was Python 3.11. The key issue was not just Python syntax or package installation; the Ascend, Triton, torch-npu, and vLLM Ascend pieces had to match.
+
+Use Python 3.11 unless the upstream wheel matrix explicitly supports the exact versions you need on Python 3.12.
+
+### Failure: vLLM Ascend 0.18 Graph Mode
+
+The `0.18.0rc1` stack could serve in eager mode, but graph mode failed. This made it a useful baseline but not the final deployment.
+
+The corrected route was:
+
+```text
+vLLM Ascend source tag: v0.19.1rc1
+vLLM source tag:        v0.19.1
+```
+
+### Failure: GCC Too Old During Build
+
+System GCC 7.3 is too old for PyTorch C++ extension compilation:
+
+```text
+#error "You're trying to build PyTorch with a too old version of GCC. We need GCC 9 or later."
+```
+
+Installing conda GCC/G++ fixed the Python extension build, but globally exporting `CC` and `CXX` for the whole build can break the CANN custom-op path. Use the split-compiler approach:
+
+```bash
+export C_COMPILER=/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/aarch64-conda-linux-gnu-gcc
+export CXX_COMPILER=/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/aarch64-conda-linux-gnu-g++
+python -m pip install --no-build-isolation --no-deps -v .
+```
+
+### Failure: GCC Too Old During Serve
+
+After the package built successfully, serve could still fail because Triton Ascend JIT used `/usr/bin/g++`.
+
+Set runtime compiler variables:
+
+```bash
+export CC=/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/aarch64-conda-linux-gnu-g++
+export CXX=/home/ma-user/work/venvs/vllm-ascend-0191-py311/bin/aarch64-conda-linux-gnu-g++
+```
+
+### Failure: Missing `libatb.so`
+
+Graph mode failed with:
+
+```text
+OSError: libatb.so: cannot open shared object file: No such file or directory
+```
+
+The library was present under:
+
+```text
+/usr/local/Ascend/nnal/atb/8.5.2/atb/cxx_abi_1/lib/libatb.so
+```
+
+The fix was to source:
+
+```bash
+source /usr/local/Ascend/nnal/atb/set_env.sh
+```
+
+### Failure: Setuptools 82
+
+Setuptools 82 broke imports that still relied on `pkg_resources`.
+
+Pin:
+
+```bash
+python -m pip install setuptools==80.9.0
+```
+
+### Failure: NumPy and OpenCV Drift
+
+The deployment was stabilized with:
+
+```bash
+python -m pip install numpy==1.26.4 opencv-python-headless==4.11.0.86
+```
+
+This avoided unnecessary ABI and dependency-range churn while preserving the vLLM Ascend path.
+
+## Fresh Redeploy Checklist
+
+Use this checklist for a new machine:
+
+1. Put everything under `/home/ma-user/work`.
+2. Download `Eco-Tech/Qwen3.6-27B-w8a8` from ModelScope.
+3. Create Python 3.11 env at `/home/ma-user/work/venvs/vllm-ascend-0191-py311`.
+4. Install torch `2.9.0`, torch-npu `2.9.0.post1+gitee7ba04`, triton-ascend `3.2.0.dev20260322`.
+5. Clone vLLM and checkout `v0.19.1`.
+6. Install vLLM with `VLLM_TARGET_DEVICE=empty`.
+7. Clone vLLM Ascend and checkout `v0.19.1rc1`.
+8. Install conda GCC/G++ into the env.
+9. Build vLLM Ascend with `C_COMPILER` and `CXX_COMPILER`, not global `CC/CXX`.
+10. Pin `numpy==1.26.4`, `opencv-python-headless==4.11.0.86`, `setuptools==80.9.0`.
+11. Verify `vllm_ascend.vllm_ascend_C` imports.
+12. For graph mode, source both custom-op env and ATB env.
+13. For runtime, export `CC` and `CXX` to conda G++.
+14. Start with 4K context and small graph capture sizes.
+15. Verify `/v1/models` and `/v1/chat/completions`.
+
+## Operational Notes
+
+Startup is slow on the first graph run. On the validated one-card smoke test:
+
+- Weight loading took about 156 seconds.
+- Torch compile and initial profiling/warmup took about 108 seconds.
+- Graph capture took about 22 seconds.
+- Total time to API readiness was several minutes.
+
+HBM after startup was roughly:
+
+```text
+Weights:              33.6 GiB
+Peak activation:       2.74 GiB
+NPU graph memory:      0.22 GiB
+Current KV cache:     13.5 GiB
+```
+
+For larger context or higher concurrency, scale carefully. The one-card 910B3 test is a smoke deployment, not the official long-context production shape. For 262K context, follow the official multi-card A2/A3 guidance and increase TP/DP according to the available hardware.
+
+## Final Takeaway
+
+The successful deployment was not unlocked by changing CANN. CANN stayed at `8.5.2`.
+
+The real unlock was aligning the software stack around vLLM Ascend `v0.19.1rc1`, building the native extension with the right compiler split, using conda G++ for Triton runtime JIT, and sourcing ATB before graph serving.
+
+For a fast redeploy, start from:
+
+```text
+Python 3.11
+CANN 8.5.2
+torch 2.9.0
+torch-npu 2.9.0.post1+gitee7ba04
+triton-ascend 3.2.0.dev20260322
+vLLM v0.19.1
+vLLM Ascend v0.19.1rc1
+ModelScope Eco-Tech/Qwen3.6-27B-w8a8
+FULL_DECODE_ONLY graph mode
+ATB env sourced
+runtime CC/CXX set to conda G++
+```
+
+That combination produced a working OpenAI-compatible endpoint on Ascend 910B3.
