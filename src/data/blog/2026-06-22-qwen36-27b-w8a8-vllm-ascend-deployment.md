@@ -1,7 +1,7 @@
 ---
 author: Robin
-pubDatetime: 2026-06-22T09:15:00-03:00
-modDatetime: 2026-06-22T10:35:00-03:00
+pubDatetime: 2026-05-31T09:15:00-03:00
+modDatetime: 2026-05-31T10:35:00-03:00
 title: "Deploying Qwen3.6-27B-W8A8 on Huawei Ascend 910B with vLLM Ascend"
 description: "A field-tested deployment guide for Qwen3.6-27B-W8A8 on Huawei Ascend 910B/A2 with vLLM Ascend v0.19.1rc1 and vLLM v0.19.1, covering CANN 8.5.2, Python 3.11, torch-npu 2.9, Triton Ascend, native kernels, ATB, graph mode, and the failure fixes needed to make deployment repeatable."
 tags:
